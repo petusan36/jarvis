@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import getpass
 import importlib.util
 import os
 import sys
@@ -123,6 +124,8 @@ def _crear_cerebro(config: Config):
             motor = "api"
         elif importlib.util.find_spec("claude_agent_sdk") is not None:
             motor = "suscripcion"
+        elif sys.stdin.isatty():
+            motor = _menu_activacion()
         else:
             raise RuntimeError(
                 "No encuentro cómo conectar con Claude. Elige una opción:\n"
@@ -141,6 +144,59 @@ def _crear_cerebro(config: Config):
         return Cerebro(config, herramientas)
     except anthropic.AnthropicError as error:
         raise RuntimeError(f"No puedo conectar con Claude: {error}") from error
+
+
+def _menu_activacion() -> str:
+    """Pregunta cómo conectar con Claude cuando no hay clave ni suscripción listas.
+
+    Solo guía: escribe la clave en .env si el usuario la da, pero no instala
+    paquetes ni ejecuta `claude` por él.
+    """
+    print("No encuentro cómo conectar con Claude. ¿Cómo quieres activarlo?")
+    print("  1) Ya tengo (o voy a pegar ahora) una clave de API")
+    print("  2) Uso mi suscripción Pro/Max de Claude")
+    try:
+        eleccion = input("Elige 1 o 2: ").strip()
+    except (EOFError, KeyboardInterrupt):
+        eleccion = ""
+
+    if eleccion == "1":
+        clave = getpass.getpass("Pega tu ANTHROPIC_API_KEY (de https://console.anthropic.com): ").strip()
+        if not clave:
+            raise RuntimeError("No diste ninguna clave. Copia .env.example como .env y pon tu ANTHROPIC_API_KEY.")
+        _guardar_en_env("ANTHROPIC_API_KEY", clave)
+        os.environ["ANTHROPIC_API_KEY"] = clave
+        print("(clave guardada en .env)")
+        return "api"
+
+    if eleccion == "2":
+        if importlib.util.find_spec("claude_agent_sdk") is None:
+            raise RuntimeError(
+                "Para usar tu suscripción instala el soporte y vuelve a ejecutar python -m jarvis:\n"
+                "  pip install -e '.[suscripcion]'\n"
+                "  claude   (dentro, escribe /login e inicia sesión con tu cuenta)"
+            )
+        print("(usando tu suscripción; si todavía no iniciaste sesión, ejecuta `claude` y escribe /login)")
+        return "suscripcion"
+
+    raise RuntimeError(
+        "No encuentro cómo conectar con Claude. Elige una opción:\n"
+        "  - Clave de API: copia .env.example como .env y pon tu ANTHROPIC_API_KEY.\n"
+        "  - Suscripción Pro/Max: pip install -e '.[suscripcion]' e inicia sesión con `claude`."
+    )
+
+
+def _guardar_en_env(clave: str, valor: str, ruta: Path = Path(".env")) -> None:
+    """Escribe o reemplaza CLAVE=valor en .env, conservando el resto del archivo."""
+    lineas = ruta.read_text(encoding="utf-8").splitlines() if ruta.is_file() else []
+    nueva = f"{clave}={valor}"
+    for i, linea in enumerate(lineas):
+        if linea.strip().startswith(f"{clave}="):
+            lineas[i] = nueva
+            break
+    else:
+        lineas.append(nueva)
+    ruta.write_text("\n".join(lineas) + "\n", encoding="utf-8")
 
 
 def _hay_credenciales_api() -> bool:

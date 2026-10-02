@@ -45,6 +45,10 @@ cp .env.example .env             # y pon tu clave en ANTHROPIC_API_KEY
 
 ## Usar tu suscripción de Claude (sin clave de API)
 
+Si al arrancar `python -m jarvis` no encuentra ni clave de API ni suscripción
+lista, te muestra un menú para elegir ahí mismo (y, si eliges clave, te la
+guarda en `.env`). Para dejarlo listo de antemano:
+
 Si tienes Claude Pro o Max, Jarvis puede usar tu suscripción a través de
 Claude Code, que se ejecuta en tu equipo con tu propia sesión:
 

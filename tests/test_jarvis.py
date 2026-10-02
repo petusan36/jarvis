@@ -1,5 +1,6 @@
 """Pruebas sin red: se sustituye el cliente de Claude por uno falso."""
 
+import os
 from types import SimpleNamespace as NS
 
 import pytest
@@ -225,6 +226,70 @@ def test_auto_sin_clave_usa_suscripcion(monkeypatch, tmp_path):
     cerebro = _crear_cerebro(Config(carpeta_datos=tmp_path))
     assert isinstance(cerebro, CerebroSuscripcion)
     cerebro.cerrar()
+
+
+def test_menu_activacion_opcion_api_guarda_env(monkeypatch, tmp_path):
+    from jarvis.__main__ import _menu_activacion
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setattr("builtins.input", lambda _: "1")
+    monkeypatch.setattr("getpass.getpass", lambda _: "sk-ant-prueba")
+
+    assert _menu_activacion() == "api"
+    assert os.environ["ANTHROPIC_API_KEY"] == "sk-ant-prueba"
+    assert "ANTHROPIC_API_KEY=sk-ant-prueba" in (tmp_path / ".env").read_text()
+
+
+def test_menu_activacion_opcion_api_sin_clave_falla(monkeypatch, tmp_path):
+    from jarvis.__main__ import _menu_activacion
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("builtins.input", lambda _: "1")
+    monkeypatch.setattr("getpass.getpass", lambda _: "")
+
+    with pytest.raises(RuntimeError, match="ANTHROPIC_API_KEY"):
+        _menu_activacion()
+
+
+def test_menu_activacion_opcion_suscripcion_sin_sdk_instalado(monkeypatch):
+    from jarvis.__main__ import _menu_activacion
+
+    monkeypatch.setattr("builtins.input", lambda _: "2")
+    monkeypatch.setattr("jarvis.__main__.importlib.util.find_spec", lambda _: None)
+
+    with pytest.raises(RuntimeError, match="suscripcion"):
+        _menu_activacion()
+
+
+def test_menu_activacion_opcion_suscripcion_con_sdk_instalado(monkeypatch):
+    from jarvis.__main__ import _menu_activacion
+
+    monkeypatch.setattr("builtins.input", lambda _: "2")
+    monkeypatch.setattr("jarvis.__main__.importlib.util.find_spec", lambda _: object())
+
+    assert _menu_activacion() == "suscripcion"
+
+
+def test_menu_activacion_opcion_invalida_falla(monkeypatch):
+    from jarvis.__main__ import _menu_activacion
+
+    monkeypatch.setattr("builtins.input", lambda _: "3")
+
+    with pytest.raises(RuntimeError, match="No encuentro"):
+        _menu_activacion()
+
+
+def test_guardar_en_env_reemplaza_sin_duplicar(tmp_path):
+    from jarvis.__main__ import _guardar_en_env
+
+    ruta = tmp_path / ".env"
+    ruta.write_text("ANTHROPIC_API_KEY=vieja\nJARVIS_IDIOMA=es\n", encoding="utf-8")
+
+    _guardar_en_env("ANTHROPIC_API_KEY", "nueva", ruta)
+
+    lineas = ruta.read_text(encoding="utf-8").splitlines()
+    assert lineas == ["ANTHROPIC_API_KEY=nueva", "JARVIS_IDIOMA=es"]
 
 
 def _detectar(detector, volumenes):
