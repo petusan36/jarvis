@@ -187,25 +187,8 @@ class MotorKokoro:
         if not trozos:
             return
         audio = _quitar_clics(self.np.concatenate(trozos), self.np, self.frecuencia)
-        _volcar_audio_depuracion(audio, self.frecuencia)
         self.sd.play(audio, self.frecuencia, latency="high")
         self.sd.wait()
-
-
-def _volcar_audio_depuracion(audio, frecuencia: int) -> None:
-    """Temporal: guarda el audio exacto antes de reproducirlo, para comparar
-    contra lo que se escucha en vivo. Quitar una vez resuelto el looper."""
-    import time
-
-    try:
-        import soundfile as sf
-    except ImportError:
-        return
-    carpeta = Path.home() / ".jarvis" / "depuracion_audio"
-    carpeta.mkdir(parents=True, exist_ok=True)
-    ruta = carpeta / f"kokoro_{int(time.time() * 1000)}.wav"
-    sf.write(ruta, audio, frecuencia)
-    print(f"(depuración: audio guardado en {ruta})")
 
 
 def _quitar_clics(audio, np, frecuencia: int, umbral: float = 0.3, ventana_ms: float = 6.0):
