@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>J.A.R.V.I.S.</title>
+<style>
+  :root { --cian: #4fd8ff; --fondo: #02070d; }
+  html, body { margin: 0; height: 100%; background: var(--fondo); overflow: hidden;
+    font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif; color: var(--cian); }
+  canvas { position: fixed; inset: 0; width: 100%; height: 100%; }
+  #panel { position: fixed; left: 0; right: 0; bottom: 6vh; text-align: center; pointer-events: none; }
+  #estado { font-size: 15px; letter-spacing: .6em; text-shadow: 0 0 12px var(--cian); }
+  #texto { margin: 14px auto 0; max-width: min(760px, 90vw); font-size: 17px; line-height: 1.45;
+    color: #bfefff; opacity: .85; min-height: 2.9em; }
+  #titulo { position: fixed; top: 4vh; left: 0; right: 0; text-align: center; font-size: 13px;
+    letter-spacing: .9em; opacity: .55; }
+</style>
+</head>
+<body>
+<canvas id="lienzo"></canvas>
+<div id="titulo">J.A.R.V.I.S.</div>
+<div id="panel"><div id="estado">CONECTANDO</div><div id="texto"></div></div>
+<script>
+"use strict";
+const lienzo = document.getElementById("lienzo");
+const ctx = lienzo.getContext("2d");
+const etiqueta = document.getElementById("estado");
+const caja = document.getElementById("texto");
+
+const NOMBRES = { reposo: "EN ESPERA", escuchando: "ESCUCHANDO", pensando: "PROCESANDO",
+                  hablando: "RESPONDIENDO" };
+// Parámetros de cada estado; la animación se desliza suavemente de uno a otro.
+const PERFILES = {
+  reposo:     { giro: 0.15, brillo: 0.55, pulso: 0.04, barras: 0.0, orbitas: 0.0, tono: [79, 216, 255] },
+  escuchando: { giro: 0.35, brillo: 0.85, pulso: 0.02, barras: 1.0, orbitas: 0.0, tono: [79, 216, 255] },
+  pensando:   { giro: 1.60, brillo: 0.90, pulso: 0.06, barras: 0.0, orbitas: 1.0, tono: [255, 196, 87] },
+  hablando:   { giro: 0.50, brillo: 1.00, pulso: 0.00, barras: 0.6, orbitas: 0.0, tono: [120, 230, 255] },
+};
+
+let estado = "reposo";
+const actual = { ...PERFILES.reposo, tono: [...PERFILES.reposo.tono] };
+let nivelMic = 0, nivelVoz = 0, angulo = 0;
+// Ganancia automática: cada micrófono da niveles distintos, así que se resta el ruido de
+// fondo y se divide por el pico reciente. El suelo de 0,12 evita amplificar el silencio.
+let ruidoFondo = 0.05, picoReciente = 0.12;
+function normalizarNivel(valor) {
+  ruidoFondo = valor < ruidoFondo ? valor : ruidoFondo + (valor - ruidoFondo) * 0.002;
+  picoReciente = Math.max(picoReciente * 0.995, valor, ruidoFondo + 0.12);
+  return Math.max(0, valor - ruidoFondo) / (picoReciente - ruidoFondo);
+}
+const espectro = new Float32Array(96);
+
+function conectar() {
+  const fuente = new EventSource("/eventos");
+  fuente.onmessage = (e) => {
+    const evento = JSON.parse(e.data);
+    if (evento.tipo === "estado") cambiarEstado(evento.estado, evento.texto);
+    else if (evento.tipo === "nivel") nivelMic = Math.max(nivelMic, normalizarNivel(evento.valor));
+  };
+  fuente.onerror = () => { etiqueta.textContent = "SIN CONEXIÓN"; };
+}
+
+// En modo texto la respuesta no se pronuncia: se mantiene la animación de "hablando"
+// un tiempo proporcional a su longitud antes de pasar al siguiente estado.
+let hablarHasta = 0, pendiente = null;
+function cambiarEstado(nuevo, texto) {
+  const espera = hablarHasta - performance.now();
+  clearTimeout(pendiente);
+  if (nuevo !== "hablando" && espera > 0) {
+    pendiente = setTimeout(() => cambiarEstado(nuevo, texto), espera);
+    return;
+  }
+  estado = PERFILES[nuevo] ? nuevo : "reposo";
+  etiqueta.textContent = NOMBRES[estado];
+  caja.textContent = texto || "";
+  hablarHasta = estado === "hablando"
+    ? performance.now() + Math.min(8000, 1200 + 45 * (texto || "").length) : 0;
+}
+
+function ajustarTamano() {
+  const r = window.devicePixelRatio || 1;
+  lienzo.width = innerWidth * r;
+  lienzo.height = innerHeight * r;
+  ctx.setTransform(r, 0, 0, r, 0, 0);
+}
+addEventListener("resize", ajustarTamano);
+
+const mezclar = (a, b, f) => a + (b - a) * f;
+const color = (alfa) => `rgba(${actual.tono.map(Math.round).join(",")},${alfa})`;
+
+function arco(radio, inicio, largo, grosor, alfa) {
+  ctx.beginPath();
+  ctx.arc(0, 0, radio, inicio, inicio + largo);
+  ctx.lineWidth = grosor;
+  ctx.strokeStyle = color(alfa);
+  ctx.stroke();
+}
+
+function anilloSegmentado(radio, segmentos, hueco, grosor, giro, alfa) {
+  const paso = (Math.PI * 2) / segmentos;
+  for (let i = 0; i < segmentos; i++) arco(radio, giro + i * paso, paso - hueco, grosor, alfa);
+}
+
+function marcas(radio, cantidad, largo, giro, alfa) {
+  ctx.beginPath();
+  for (let i = 0; i < cantidad; i++) {
+    const a = giro + (i / cantidad) * Math.PI * 2;
+    const l = i % 5 === 0 ? largo * 2 : largo;
+    ctx.moveTo(Math.cos(a) * radio, Math.sin(a) * radio);
+    ctx.lineTo(Math.cos(a) * (radio + l), Math.sin(a) * (radio + l));
+  }
+  ctx.lineWidth = 1;
+  ctx.strokeStyle = color(alfa);
+  ctx.stroke();
+}
+
+let anterior = performance.now();
+function dibujar(ahora) {
+  const dt = Math.min(0.05, (ahora - anterior) / 1000);
+  anterior = ahora;
+  const t = ahora / 1000;
+
+  // Transición suave hacia el perfil del estado actual.
+  const meta = PERFILES[estado];
+  const f = 1 - Math.pow(0.02, dt);
+  for (const k of ["giro", "brillo", "pulso", "barras", "orbitas"]) actual[k] = mezclar(actual[k], meta[k], f);
+  actual.tono = actual.tono.map((c, i) => mezclar(c, meta.tono[i], f));
+
+  // Volumen: el del micrófono al escuchar; uno simulado al hablar (la voz del sistema no lo da).
+  nivelMic *= Math.pow(0.04, dt);
+  const vozMeta = estado === "hablando"
+    ? 0.35 + 0.35 * Math.abs(Math.sin(t * 9.3) * Math.sin(t * 3.7 + 1)) + 0.2 * Math.random()
+    : 0;
+  nivelVoz = mezclar(nivelVoz, vozMeta, 1 - Math.pow(0.0005, dt));
+  const energia = Math.max(nivelMic, nivelVoz);
+
+  angulo += dt * actual.giro;
+  const w = innerWidth, h = innerHeight;
+  const R = Math.min(w, h) * 0.30;
+  const respira = 1 + actual.pulso * Math.sin(t * 1.6) + energia * 0.06;
+  const b = actual.brillo;
+
+  ctx.fillStyle = "rgba(2,7,13,0.35)";  // estela ligera en lugar de borrar del todo
+  ctx.fillRect(0, 0, w, h);
+
+  ctx.save();
+  ctx.translate(w / 2, h / 2 - h * 0.04);
+  ctx.globalCompositeOperation = "lighter";
+  ctx.shadowColor = color(0.9);
+  ctx.shadowBlur = 14;
+
+  // Núcleo (arco reactor).
+  const nucleo = R * 0.22 * respira;
+  const halo = ctx.createRadialGradient(0, 0, 0, 0, 0, nucleo * 2.2);
+  halo.addColorStop(0, `rgba(255,255,255,${0.5 * b})`);
+  halo.addColorStop(0.3, color(0.35 * b + energia * 0.3));
+  halo.addColorStop(1, color(0));
+  ctx.fillStyle = halo;
+  ctx.beginPath(); ctx.arc(0, 0, nucleo * 2.2, 0, Math.PI * 2); ctx.fill();
+  anilloSegmentado(nucleo * 1.15, 10, 0.12, 3, -angulo * 1.5, 0.8 * b);
+  arco(nucleo * 1.45, 0, Math.PI * 2, 1, 0.5 * b);
+
+  // Anillos que giran en sentidos opuestos.
+  anilloSegmentado(R * 0.45 * respira, 3, 0.5, 6, angulo * 2.2, 0.75 * b);
+  marcas(R * 0.55, 120, 4, -angulo * 0.6, 0.45 * b);
+  anilloSegmentado(R * 0.66, 48, 0.035, 2, -angulo, 0.5 * b);
+  arco(R * 0.78, angulo * 1.3, Math.PI * 1.2, 3, 0.7 * b);
+  arco(R * 0.78, angulo * 1.3 + Math.PI * 1.35, Math.PI * 0.4, 3, 0.4 * b);
+  marcas(R * 0.92, 180, 3, angulo * 0.3, 0.3 * b);
+  anilloSegmentado(R * 1.02, 6, 0.9, 1.5, -angulo * 0.4, 0.55 * b);
+
+  // Barras radiales: vibran con la voz (escuchando y hablando).
+  if (actual.barras > 0.01) {
+    for (let i = 0; i < espectro.length; i++) {
+      const ruido = 0.5 + 0.5 * Math.sin(t * 7 + i * 0.9) * Math.sin(t * 2.3 + i * 0.37);
+      espectro[i] = mezclar(espectro[i], energia * ruido, 0.25);
+    }
+    ctx.beginPath();
+    const base = R * 1.1;
+    for (let i = 0; i < espectro.length; i++) {
+      const a = (i / espectro.length) * Math.PI * 2 - Math.PI / 2;
+      const largo = 3 + espectro[i] * R * 0.35;
+      ctx.moveTo(Math.cos(a) * base, Math.sin(a) * base);
+      ctx.lineTo(Math.cos(a) * (base + largo), Math.sin(a) * (base + largo));
+    }
+    ctx.lineWidth = 2.5;
+    ctx.strokeStyle = color(0.8 * actual.barras * b);
+    ctx.stroke();
+  }
+
+  // Órbitas de escaneo mientras piensa.
+  if (actual.orbitas > 0.01) {
+    for (let i = 0; i < 3; i++) {
+      const r = R * (0.6 + i * 0.22);
+      const a = t * (2.4 - i * 0.6) * (i % 2 ? -1 : 1);
+      arco(r, a, Math.PI * 0.35, 2, 0.9 * actual.orbitas);
+      ctx.fillStyle = `rgba(255,255,255,${actual.orbitas})`;
+      ctx.beginPath();
+      ctx.arc(Math.cos(a + Math.PI * 0.35) * r, Math.sin(a + Math.PI * 0.35) * r, 3.5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+  ctx.restore();
+
+  etiqueta.style.color = color(1);
+  requestAnimationFrame(dibujar);
+}
+
+ajustarTamano();
+conectar();
+requestAnimationFrame(dibujar);
+</script>
+</body>
+</html>

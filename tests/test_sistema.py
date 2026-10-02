@@ -1,0 +1,112 @@
+"""Pruebas de las herramientas de carpetas y aplicaciones (sin tocar el equipo real)."""
+
+import subprocess
+
+import pytest
+
+from jarvis.herramientas import Herramientas
+from jarvis.sistema import registrar_sistema
+
+
+class EjecutorFalso:
+    def __init__(self, salida="", codigo=0):
+        self.comandos = []
+        self.salida, self.codigo = salida, codigo
+
+    def __call__(self, comando):
+        self.comandos.append(comando)
+        return subprocess.CompletedProcess(comando, self.codigo, self.salida, "")
+
+
+@pytest.fixture
+def casa(tmp_path):
+    casa = tmp_path / "casa"
+    (casa / "Documents" / "trabajo").mkdir(parents=True)
+    (casa / "Documents" / "factura_enero.pdf").write_text("x")
+    (casa / "Documents" / "trabajo" / "factura_febrero.pdf").write_text("x")
+    (casa / "Documents" / ".oculto").write_text("x")
+    (casa / "Library" / "factura_cache").mkdir(parents=True)
+    (casa / "script.command").write_text("rm -rf /")
+    (tmp_path / "fuera.txt").write_text("secreto")
+    return casa
+
+
+@pytest.fixture
+def sistema(tmp_path, casa):
+    h = Herramientas(tmp_path / "datos", sistema=False)
+    ejecutor = EjecutorFalso()
+    registrar_sistema(h, carpeta_personal=casa, ejecutar=ejecutor)
+    h.ejecutor = ejecutor
+    return h
+
+
+def test_listar_carpeta(sistema):
+    salida, error = sistema.ejecutar("listar_carpeta", {"ruta": "Documents"})
+    assert not error
+    assert "trabajo/" in salida and "factura_enero.pdf" in salida and ".oculto" not in salida
+
+
+def test_nombres_de_carpeta_en_espanol(sistema):
+    salida, error = sistema.ejecutar("listar_carpeta", {"ruta": "Documentos/trabajo"})
+    assert not error and "factura_febrero.pdf" in salida
+
+
+def test_no_sale_de_la_carpeta_personal(sistema):
+    for ruta in ("..", "~/../", "/etc", "../fuera.txt"):
+        salida, error = sistema.ejecutar("listar_carpeta", {"ruta": ruta})
+        assert error, ruta
+    assert sistema.ejecutar("abrir_archivo_o_carpeta", {"ruta": "../fuera.txt"})[1]
+    assert sistema.ejecutor.comandos == []
+
+
+def test_buscar_archivos(sistema):
+    salida, error = sistema.ejecutar("buscar_archivos", {"texto": "FACTURA", "carpeta": "~"})
+    assert not error
+    assert "~/Documents/factura_enero.pdf" in salida
+    assert "~/Documents/trabajo/factura_febrero.pdf" in salida
+    assert "Library" not in salida
+
+
+def test_abrir_archivo(sistema, casa):
+    salida, error = sistema.ejecutar("abrir_archivo_o_carpeta", {"ruta": "Documents/factura_enero.pdf"})
+    assert not error
+    assert sistema.ejecutor.comandos[-1][-1] == str((casa / "Documents" / "factura_enero.pdf").resolve())
+
+
+def test_no_abre_scripts(sistema):
+    assert sistema.ejecutar("abrir_archivo_o_carpeta", {"ruta": "script.command"})[1]
+    assert sistema.ejecutor.comandos == []
+
+
+def test_abrir_aplicacion(sistema):
+    assert not sistema.ejecutar("abrir_aplicacion", {"nombre": "Safari"})[1]
+    assert sistema.ejecutor.comandos == [["open", "-a", "Safari"]]
+
+
+def test_cerrar_aplicacion_exige_confirmacion_en_otro_mensaje(sistema):
+    sistema.nuevo_turno()
+    # Aunque diga confirmado=true, sin haber preguntado antes no cierra nada.
+    salida, _ = sistema.ejecutar("cerrar_aplicacion", {"nombre": "Safari", "confirmado": True})
+    assert "pendiente" in salida
+    # Tampoco vale confirmar en el mismo mensaje en que se pidió.
+    sistema.ejecutar("cerrar_aplicacion", {"nombre": "Safari", "confirmado": True})
+    assert sistema.ejecutor.comandos == []
+
+    sistema.nuevo_turno()  # el usuario responde "sí"
+    salida, error = sistema.ejecutar("cerrar_aplicacion", {"nombre": "safari", "confirmado": True})
+    assert not error and "cerrada" in salida
+    assert sistema.ejecutor.comandos == [["osascript", "-e", 'tell application "safari" to quit']]
+
+
+def test_cerrar_aplicacion_escapa_comillas(sistema):
+    sistema.ejecutar("cerrar_aplicacion", {"nombre": 'X" to quit\ndo shell script "ls', "confirmado": False})
+    sistema.nuevo_turno()
+    sistema.ejecutar("cerrar_aplicacion", {"nombre": 'X" to quit\ndo shell script "ls', "confirmado": True})
+    script = sistema.ejecutor.comandos[-1][-1]
+    assert script.startswith('tell application "X\\" to quit')
+
+
+def test_no_hay_herramientas_de_borrar(tmp_path):
+    nombres = {d["name"] for d in Herramientas(tmp_path).definiciones()}
+    assert {"listar_carpeta", "abrir_aplicacion", "cerrar_aplicacion"} <= nombres
+    assert not any(p in n for n in nombres for p in ("borrar", "eliminar", "mover"))
