@@ -22,6 +22,7 @@ if TYPE_CHECKING:
 MAX_ELEMENTOS = 40
 MAX_RESULTADOS = 20
 MAX_CARPETAS_BUSQUEDA = 5000
+MAX_TEXTO_PDF = 20000  # caracteres; de más, se trunca
 # Carpetas enormes o internas que no merece la pena recorrer al buscar.
 CARPETAS_IGNORADAS = {"Library", "node_modules", ".Trash", "__pycache__", ".git", ".venv"}
 # Abrir estos archivos ejecutaría código, así que no se permite.
@@ -136,6 +137,26 @@ def registrar_sistema(h: "Herramientas", carpeta_personal: Path | None = None,
             raise PermissionError("por seguridad no abro scripts ejecutables")
         comprobar(ejecutar([_abridor(), str(destino)]), f"abrir {_mostrar(destino)}")
         return f"Abierto {_mostrar(destino)}."
+
+    @h.registrar(
+        "leer_pdf",
+        "Extrae el texto de un PDF de la carpeta personal del usuario, para leerlo, "
+        "resumirlo o responder preguntas sobre su contenido.",
+        {"ruta": {"type": "string", "description": "Por ejemplo 'Documents/factura.pdf'."}},
+    )
+    def leer_pdf(ruta: str) -> str:
+        destino = resolver(ruta)
+        if destino.suffix.lower() != ".pdf":
+            raise ValueError(f"{_mostrar(destino)} no es un PDF")
+        from pypdf import PdfReader
+
+        lector = PdfReader(destino)
+        texto = "\n".join(pagina.extract_text() or "" for pagina in lector.pages).strip()
+        if not texto:
+            return f"{_mostrar(destino)} no tiene texto que se pueda extraer (¿quizás escaneado sin OCR?)."
+        if len(texto) > MAX_TEXTO_PDF:
+            texto = texto[:MAX_TEXTO_PDF] + "\n... (truncado)"
+        return f"Contenido de {_mostrar(destino)} ({len(lector.pages)} páginas):\n{texto}"
 
     @h.registrar(
         "abrir_aplicacion",

@@ -21,7 +21,7 @@ from .config import Config
 from .herramientas import Herramientas
 from .hud import Hud, HudNulo
 
-SALIR = {"salir", "adiós", "adios", "exit", "quit"}
+SALIR = {"salir", "cerrar", "cierra", "adiós", "adios", "exit", "quit"}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -46,6 +46,10 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     config = Config.desde_entorno()
+    if not _tomar_instancia_unica(config.carpeta_datos):
+        print("Jarvis ya está abierto (otra instancia sigue corriendo).", file=sys.stderr)
+        return 0
+
     clave_persistente = "ANTHROPIC_API_KEY" in os.environ  # ya venía de .env/entorno real
     try:
         cerebro = _crear_cerebro(config)
@@ -58,6 +62,7 @@ def main(argv: list[str] | None = None) -> int:
     finally:
         if not clave_persistente:
             os.environ.pop("ANTHROPIC_API_KEY", None)  # la del menú no sobrevive a esta ejecución
+        _liberar_instancia(config.carpeta_datos)
 
 
 def _ejecutar(args, config: Config, cerebro) -> int:
@@ -124,6 +129,8 @@ def _ejecutar(args, config: Config, cerebro) -> int:
                 raise
             respuesta = f"No consigo hablar con Claude Code: {error}"
         _decir(respuesta, habla, hud)
+        if cerebro.herramientas.salir_pedido:
+            break
 
     if hasattr(cerebro, "cerrar"):
         cerebro.cerrar()
@@ -143,7 +150,7 @@ def _decir(texto: str, habla, hud: HudNulo) -> None:
 
 def _crear_cerebro(config: Config):
     """Elige entre la API (clave) y la suscripción de Claude (Claude Code con tu sesión)."""
-    herramientas = Herramientas(config.carpeta_datos)
+    herramientas = Herramientas(config.carpeta_datos, youtube_api_key=config.youtube_api_key)
     motor = config.motor
     if motor == "auto":
         if _hay_credenciales_api():
@@ -209,6 +216,36 @@ def _menu_activacion() -> str:
         "  - Clave de API: copia .env.example como .env y pon tu ANTHROPIC_API_KEY.\n"
         "  - Suscripción Pro/Max: ejecuta `claude` e inicia sesión con /login."
     )
+
+
+def _tomar_instancia_unica(carpeta_datos: Path) -> bool:
+    """Evita abrir dos Jarvis a la vez (ej. doble clic repetido en el ícono).
+
+    Devuelve False si ya hay una instancia viva. Un .pid de un proceso muerto
+    (cierre sucio, apagón) se ignora solo: no hace falta borrarlo a mano.
+    """
+    ruta = carpeta_datos / "jarvis.pid"
+    if ruta.is_file():
+        try:
+            pid_anterior = int(ruta.read_text().strip())
+            os.kill(pid_anterior, 0)
+            return False  # el proceso sigue vivo
+        except ProcessLookupError:
+            pass  # el proceso ya no existe: .pid viejo de un cierre sucio
+        except (ValueError, OSError):
+            pass  # .pid corrupto, o el SO no deja preguntar (ej. permisos, Windows): seguimos
+    carpeta_datos.mkdir(parents=True, exist_ok=True)
+    ruta.write_text(str(os.getpid()))
+    return True
+
+
+def _liberar_instancia(carpeta_datos: Path) -> None:
+    ruta = carpeta_datos / "jarvis.pid"
+    try:
+        if int(ruta.read_text().strip()) == os.getpid():
+            ruta.unlink()
+    except (OSError, ValueError):
+        pass  # ya no está, o es de otra instancia: no tocar
 
 
 def _hay_sesion_claude() -> bool:

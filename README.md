@@ -245,6 +245,9 @@ Jarvis puede manejar tu Mac por voz o texto:
 
 - **Carpetas y archivos**: "¿qué hay en Descargas?", "busca la factura de enero",
   "abre la carpeta Documentos" o "abre el informe.pdf".
+- **Leer PDFs**: "leé el informe.pdf de Documentos y resumímelo" — extrae el
+  texto para que Jarvis lo lea, resuma o responda preguntas sobre él (no
+  funciona con PDFs escaneados sin OCR, que no tienen texto real adentro).
 - **Aplicaciones**: "abre Spotify", "¿qué programas tengo abiertos?", "cierra Safari".
 
 Por seguridad:
@@ -252,11 +255,21 @@ Por seguridad:
 - Solo ve lo que hay dentro de tu carpeta personal (`~`), no el resto del disco.
 - No puede borrar ni mover archivos, ni abrir scripts ejecutables.
 - Antes de cerrar una aplicación te pregunta y espera a que digas que sí en tu
-  siguiente mensaje (podrías tener algo sin guardar).
+  siguiente mensaje (podrías tener algo sin guardar). Para cerrar Jarvis mismo
+  no hace falta esa confirmación: decile "cerrate" o "salí" y termina.
 
 La primera vez que liste o cierre aplicaciones, macOS te pedirá permiso para
 que la Terminal controle "System Events" o esa aplicación: acéptalo (se puede
 cambiar en Ajustes del Sistema → Privacidad y seguridad → Automatización).
+
+## Música (YouTube)
+
+"Poné Bohemian Rhapsody" o "buscá música de Serrat" abre YouTube con esa
+búsqueda. Para que reproduzca directo el primer resultado sin que tengas que
+clickear nada, consigue una clave de **YouTube Data API v3** (gratis, con
+cuota) en <https://console.cloud.google.com/apis/library/youtube.googleapis.com>
+y ponla en `YOUTUBE_API_KEY`. Sin ella, igual funciona: abre los resultados y
+elegís vos.
 
 ## Configuración
 
@@ -281,6 +294,7 @@ Todo se ajusta en el archivo `.env` (mira `.env.example`):
 | `ELEVENLABS_API_KEY` | — | Activa el motor ElevenLabs (de pago) |
 | `JARVIS_ELEVENLABS_VOZ` | `JBFqnCBsd6RMkjVDRZzb` (George) | Id de voz de <https://elevenlabs.io/app/voice-library> |
 | `JARVIS_ELEVENLABS_MODELO` | `eleven_multilingual_v2` | Modelo de ElevenLabs |
+| `YOUTUBE_API_KEY` | — | Reproduce directo el primer resultado al pedir música; sin ella, abre los resultados |
 
 ## Estructura
 
@@ -290,7 +304,8 @@ jarvis/
 ├── cerebro.py       conversación con Claude (API) y ejecución de herramientas
 ├── cerebro_suscripcion.py  lo mismo usando tu suscripción (Claude Agent SDK)
 ├── herramientas.py  herramientas que Claude puede usar
-├── sistema.py       herramientas de carpetas y aplicaciones (macOS)
+├── sistema.py       herramientas de carpetas, aplicaciones y PDFs (macOS)
+├── musica.py        buscar y reproducir música en YouTube
 ├── config.py        configuración desde .env
 ├── escritorio.py    ícono de escritorio (--instalar-app)
 ├── hud/             animación estilo Jarvis (servidor local + hud.html)

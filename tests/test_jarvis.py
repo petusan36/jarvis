@@ -51,6 +51,13 @@ def test_notas(herramientas):
     assert "comprar leche" in salida and not error
 
 
+def test_cerrar_jarvis_marca_salida_pedida(herramientas):
+    assert herramientas.salir_pedido is False
+    salida, error = herramientas.ejecutar("cerrar_jarvis", {})
+    assert not error
+    assert herramientas.salir_pedido is True
+
+
 def test_herramienta_desconocida(herramientas):
     assert herramientas.ejecutar("volar", {})[1] is True
 
@@ -91,6 +98,23 @@ def test_modo_texto_de_principio_a_fin(monkeypatch, tmp_path, capsys):
     salida = capsys.readouterr().out
     assert "JARVIS: Todo en orden, señor." in salida
     assert "Hasta luego" in salida
+
+
+def test_jarvis_se_cierra_solo_por_decision_de_claude(monkeypatch, tmp_path, capsys):
+    cliente = ClienteFalso([
+        NS(stop_reason="tool_use", content=[uso("cerrar_jarvis", {})]),
+        NS(stop_reason="end_turn", content=[texto("Hasta luego, señor.")]),
+    ])
+    monkeypatch.setenv("JARVIS_CARPETA_DATOS", str(tmp_path))
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "prueba")
+    monkeypatch.setattr("jarvis.cerebro.anthropic.Anthropic", lambda: cliente)
+    entradas = iter(["ya terminamos por hoy, cerrate"])  # nunca dice "salir" literal
+    monkeypatch.setattr("builtins.input", lambda _="": next(entradas))
+
+    # Si no cortara el bucle, el segundo input() agotaría el iterador y fallaría el test.
+    assert main(["--texto"]) == 0
+    salida = capsys.readouterr().out
+    assert "JARVIS: Hasta luego, señor." in salida
 
 
 def test_hud_envia_estados_al_navegador():
@@ -377,6 +401,43 @@ def test_menu_activacion_opcion_invalida_falla(monkeypatch):
 
     with pytest.raises(RuntimeError, match="No encuentro"):
         _menu_activacion()
+
+
+def test_instancia_unica_primera_vez_toma_el_lock(tmp_path):
+    from jarvis.__main__ import _liberar_instancia, _tomar_instancia_unica
+
+    assert _tomar_instancia_unica(tmp_path) is True
+    assert (tmp_path / "jarvis.pid").is_file()
+    _liberar_instancia(tmp_path)
+    assert not (tmp_path / "jarvis.pid").exists()
+
+
+def test_instancia_unica_rechaza_si_ya_hay_una_viva(tmp_path):
+    import os
+
+    from jarvis.__main__ import _tomar_instancia_unica
+
+    (tmp_path / "jarvis.pid").write_text(str(os.getpid()))  # este mismo proceso: siempre vivo
+
+    assert _tomar_instancia_unica(tmp_path) is False
+
+
+def test_instancia_unica_ignora_pid_de_proceso_muerto(tmp_path):
+    from jarvis.__main__ import _tomar_instancia_unica
+
+    (tmp_path / "jarvis.pid").write_text("999999999")  # casi seguro no existe
+
+    assert _tomar_instancia_unica(tmp_path) is True
+
+
+def test_liberar_instancia_no_borra_el_pid_de_otra_instancia(tmp_path):
+    from jarvis.__main__ import _liberar_instancia
+
+    (tmp_path / "jarvis.pid").write_text("1")  # pid ajeno
+
+    _liberar_instancia(tmp_path)
+
+    assert (tmp_path / "jarvis.pid").read_text() == "1"
 
 
 def test_hay_sesion_claude_detecta_archivo_de_credenciales(monkeypatch, tmp_path):
