@@ -64,12 +64,10 @@ equivocada: borralo (`rm -rf .venv`) y repetí desde `python3.12 -m venv .venv`.
 
 ## Usar tu suscripción de Claude (sin clave de API)
 
-Si al arrancar `python -m jarvis` no encuentra ni clave de API ni suscripción
-lista, te muestra un menú para elegir ahí mismo (y, si eliges clave, te la
-guarda en `.env`). Para dejarlo listo de antemano:
-
 Si tienes Claude Pro o Max, Jarvis puede usar tu suscripción a través de
-Claude Code, que se ejecuta en tu equipo con tu propia sesión:
+Claude Code, que se ejecuta en tu equipo con tu propia sesión. No está en la
+instalación de arriba porque además necesita `npm` y que inicies sesión a
+mano — hazlo una sola vez:
 
 ```bash
 pip install -e '.[suscripcion]'
@@ -79,6 +77,11 @@ claude                                      # dentro, escribe /login e inicia se
 
 Después, sin `ANTHROPIC_API_KEY` en el `.env`, `python -m jarvis` usa tu
 suscripción automáticamente (o fuérzalo con `JARVIS_MOTOR=suscripcion`).
+
+**¿No hiciste nada de esto todavía?** `python -m jarvis` igual arranca: si no
+encuentra ni clave ni suscripción, te pregunta ahí mismo cuál de las dos
+quieres y, si eliges clave, te la guarda en `.env`. Si eliges suscripción y
+falta el paso de arriba, te dice exactamente qué comando correr.
 
 Ten en cuenta:
 
