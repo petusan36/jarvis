@@ -12,9 +12,24 @@ micrófono ──► Whisper (oido.py) ──► Claude + herramientas (cerebro.
 
 ## Requisitos
 
-- Python 3.10, 3.11 o 3.12 (Kokoro, uno de los motores de voz, todavía no
-  soporta 3.13 ni 3.14; si ya tienes una versión más nueva, instala 3.12 aparte
-  solo para este proyecto)
+> ⚠️ **Tiene que ser Python 3.10, 3.11 o 3.12 — ni uno más nuevo.** Kokoro (uno
+> de los motores de voz) todavía no soporta 3.13 ni 3.14. Si creas el `.venv`
+> con una versión más nueva, `pip install` falla al buscar `kokoro` y no avisa
+> por qué. Comprueba tu versión por defecto antes de seguir:
+>
+> ```bash
+> python3 --version
+> ```
+>
+> Si te da 3.13 o más, instala 3.12 aparte (no reemplaza tu Python del
+> sistema) y úsalo solo para crear el `.venv` de este proyecto:
+>
+> | Sistema | Comando |
+> |---|---|
+> | macOS | `brew install python@3.12` |
+> | Ubuntu / Debian | `sudo apt install python3.12 python3.12-venv` |
+> | Windows | instala 3.12 desde <https://python.org/downloads> (marca "Add to PATH") |
+
 - Una de estas dos formas de conectar con Claude:
   - **Clave de API** (pago por uso): créala en <https://console.anthropic.com>
   - **Tu suscripción Pro o Max**, a través de Claude Code (ver más abajo)
@@ -22,10 +37,11 @@ micrófono ──► Whisper (oido.py) ──► Claude + herramientas (cerebro.
 
 ## Instalación
 
-Un único comando instala todo lo necesario para usar Jarvis: texto y voz (los
-cuatro motores locales). Luego, al arrancar, eliges si quieres texto o voz con
-un flag — no hace falta reinstalar nada para cambiar de modo. Las dependencias
-de desarrollo (`pytest`) son aparte, ver [Pruebas](#pruebas).
+Un único comando sin extras: `pip install -e .` ya trae todo (texto, voz con
+los cuatro motores locales, y el soporte para usar tu suscripción Pro/Max).
+Todo lo demás — qué modo usar, y cómo conectar con Claude — se decide después,
+desde la propia aplicación (ver más abajo). Las dependencias de desarrollo
+(`pytest`) son aparte, ver [Pruebas](#pruebas).
 
 | Sistema | Dependencias | Comando |
 |---|---|---|
@@ -36,26 +52,39 @@ de desarrollo (`pytest`) son aparte, ver [Pruebas](#pruebas).
 ```bash
 git clone git@github.com:petusan36/jarvis.git jarvis
 cd jarvis
-python -m venv .venv
+python3.12 -m venv .venv          # usa EXACTO 3.12 (ver Requisitos arriba)
 source .venv/bin/activate        # En Windows: .venv\Scripts\activate
-pip install -e '.[voz,voz-natural,voz-kokoro]'
-
-cp .env.example .env             # y pon tu clave en ANTHROPIC_API_KEY
+pip install -e .
 ```
 
-## Usar tu suscripción de Claude (sin clave de API)
+Si al instalar ves `ERROR: Could not find a version that satisfies the
+requirement kokoro`, tu `.venv` quedó creado con una versión de Python
+equivocada: borralo (`rm -rf .venv`) y repetí desde `python3.12 -m venv .venv`.
 
-Si tienes Claude Pro o Max, Jarvis puede usar tu suscripción a través de
-Claude Code, que se ejecuta en tu equipo con tu propia sesión:
+## Conectar con Claude: clave de API o suscripción
 
 ```bash
-pip install -e '.[suscripcion]'
-npm install -g @anthropic-ai/claude-code   # o el instalador de https://claude.com/claude-code
-claude                                      # dentro, escribe /login e inicia sesión con tu cuenta
+python -m jarvis
 ```
 
-Después, sin `ANTHROPIC_API_KEY` en el `.env`, `python -m jarvis` usa tu
-suscripción automáticamente (o fuérzalo con `JARVIS_MOTOR=suscripcion`).
+Al primer arranque, Jarvis valida solo cómo conectar con Claude:
+
+- Si encuentra `ANTHROPIC_API_KEY` en tu entorno o `.env`, usa la API.
+- Si detecta que ya iniciaste sesión en Claude Code (`claude` → `/login`), usa
+  tu suscripción Pro/Max.
+- Si no encuentra ninguna de las dos, te pregunta ahí mismo:
+  1. **Clave de API**: la pegas y Jarvis la guarda en `.env` por vos.
+  2. **Suscripción Pro/Max**: el soporte ya está instalado (no es un extra
+     aparte); solo falta que inicies sesión, algo que pip no puede hacer por
+     vos:
+     ```bash
+     npm install -g @anthropic-ai/claude-code   # o el instalador de https://claude.com/claude-code
+     claude                                      # dentro, escribe /login e inicia sesión con tu cuenta
+     ```
+     Hazlo y vuelve a ejecutar `python -m jarvis`.
+
+Una vez configurado cualquiera de los dos, Jarvis lo detecta solo en cada
+arranque (o fuérzalo con `JARVIS_MOTOR=api` / `JARVIS_MOTOR=suscripcion`).
 
 Ten en cuenta:
 
@@ -69,10 +98,40 @@ Ten en cuenta:
 - Jarvis desactiva las herramientas propias de Claude Code (terminal, editar
   archivos): solo puede usar las suyas.
 
-## Modo texto (sin micrófono)
+## Modo completo (por defecto): voz + HUD
 
 ```bash
 python -m jarvis
+```
+
+Sin ningún flag arranca todo junto: te escucha, te responde hablando y abre en
+el navegador la animación estilo Jarvis ([ver más abajo](#animación-hud)).
+
+Jarvis te escucha siempre: habla cuando quieras y, en cuanto hagas una pausa de
+menos de un segundo, entiende que has terminado y responde. Mientras él habla
+el micrófono se apaga, así que no se escucha a sí mismo. Di **salir** o pulsa
+**Ctrl+C** para terminar. La primera vez se descarga el modelo de Whisper
+(`small`, unos 500 MB).
+
+- **Sin la animación**: `python -m jarvis --sin-hud` — sigue escuchando y
+  hablando, solo que no abre el navegador.
+- **Sin voz, solo hablando por texto**: `python -m jarvis --silencio` — te
+  sigue escuchando por el micrófono, pero responde solo por texto.
+- **Solo cuando le llames**: con `JARVIS_PALABRA_ACTIVACION=jarvis` ignora lo
+  que no empiece o contenga «Jarvis» (útil si hay más gente o la tele puesta).
+  Admite variantes separadas por comas, p. ej. `jarvis,yarvis`.
+- **Si no te detecta o salta con ruido**: ajusta `JARVIS_SENSIBILIDAD_VOZ`
+  (por defecto `3`; más bajo detecta voz más baja, más alto ignora más ruido).
+- **Modo antiguo**: `python -m jarvis --pulsar` vuelve a pulsar Enter para
+  empezar y terminar, en lugar de escuchar siempre.
+
+Con altavoces a mucho volumen y el micrófono del portátil, puede oír el final
+de su propia respuesta; si pasa, baja un poco el volumen o usa auriculares.
+
+## Modo texto (sin micrófono ni HUD)
+
+```bash
+python -m jarvis --texto
 ```
 
 ```
@@ -85,32 +144,7 @@ Tú: salir
 ```
 
 Escribe `/olvidar` para empezar una conversación nueva y `salir` para terminar.
-
-## Modo voz
-
-Ya quedó instalado con el comando único de arriba. Arranca así:
-
-```bash
-python -m jarvis --voz            # te escucha y te responde hablando
-python -m jarvis --voz --silencio # te escucha pero responde solo por texto
-```
-
-Jarvis te escucha siempre: habla cuando quieras y, en cuanto hagas una pausa de
-menos de un segundo, entiende que has terminado y responde. Mientras él habla
-el micrófono se apaga, así que no se escucha a sí mismo. Di **salir** o pulsa
-**Ctrl+C** para terminar. La primera vez se descarga el modelo de Whisper
-(`small`, unos 500 MB).
-
-- **Solo cuando le llames**: con `JARVIS_PALABRA_ACTIVACION=jarvis` ignora lo
-  que no empiece o contenga «Jarvis» (útil si hay más gente o la tele puesta).
-  Admite variantes separadas por comas, p. ej. `jarvis,yarvis`.
-- **Si no te detecta o salta con ruido**: ajusta `JARVIS_SENSIBILIDAD_VOZ`
-  (por defecto `3`; más bajo detecta voz más baja, más alto ignora más ruido).
-- **Modo antiguo**: `python -m jarvis --voz --pulsar` vuelve a pulsar Enter
-  para empezar y terminar.
-
-Con altavoces a mucho volumen y el micrófono del portátil, puede oír el final
-de su propia respuesta; si pasa, baja un poco el volumen o usa auriculares.
+Si además quieres ver la animación mientras escribes: `python -m jarvis --texto --hud`.
 
 ## Voz más natural
 
@@ -152,12 +186,13 @@ en `JARVIS_ELEVENLABS_VOZ`.
 
 ## Animación (HUD)
 
-Añade `--hud` para abrir en el navegador un arco reactor con anillos que
-reaccionan a lo que hace Jarvis:
+En el modo completo (por defecto) ya se abre sola: un arco reactor en el
+navegador con anillos que reaccionan a lo que hace Jarvis. Para apagarla usa
+`--sin-hud`, o enciéndela en modo texto con `--texto --hud`:
 
 ```bash
-python -m jarvis --voz --hud
-python -m jarvis --hud            # también funciona en modo texto
+python -m jarvis                  # modo completo: voz + HUD, sin flags
+python -m jarvis --texto --hud    # modo texto, con HUD
 ```
 
 | Estado | Animación |

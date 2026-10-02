@@ -1,9 +1,9 @@
 """Convierte texto en voz con varios motores, del más natural al más básico.
 
 - elevenlabs: voz neuronal en la nube (de pago, la más natural). Necesita ELEVENLABS_API_KEY.
-- kokoro: voz neuronal local y gratuita (pip install -e '.[voz-kokoro]'), mejor calidad que Piper.
-  Necesita espeak-ng instalado en el sistema para el español.
-- piper: voz neuronal local y gratuita (pip install piper-tts). Descarga la voz la primera vez.
+- kokoro: voz neuronal local y gratuita, mejor calidad que Piper. Necesita
+  espeak-ng instalado en el sistema para el español.
+- piper: voz neuronal local y gratuita. Descarga la voz la primera vez.
 - macos: el comando `say` de macOS, con las voces mejoradas o premium del sistema.
 - pyttsx3: las voces básicas del sistema (Linux y Windows).
 
@@ -50,7 +50,7 @@ class Habla:
     def __init__(self, motores: list):
         if not motores:
             raise RuntimeError(
-                "No hay ningún motor de voz disponible. Instala uno con: pip install -e '.[voz]'"
+                "No hay ningún motor de voz disponible. Instala uno con: pip install -e ."
             )
         self.motores = list(motores)
 
@@ -175,7 +175,7 @@ class MotorKokoro:
             from kokoro import KPipeline
         except ImportError as error:
             raise NoInstalado(
-                "Kokoro no está instalado: pip install -e '.[voz-kokoro]' (necesita espeak-ng)"
+                "Kokoro no está instalado: pip install -e . (y además instala espeak-ng en el sistema)"
             ) from error
         self.sd, self.np = _audio()
         self.voz = voz
@@ -198,7 +198,7 @@ class MotorPiper:
             from piper import PiperVoice
             from piper.config import SynthesisConfig
         except ImportError as error:
-            raise NoInstalado("Piper no está instalado: pip install -e '.[voz-natural]'") from error
+            raise NoInstalado("Piper no está instalado: pip install -e .") from error
         self.sd, self.np = _audio()
         modelo = _modelo_piper(carpeta, voz or VOZ_PIPER)
         self.voz = PiperVoice.load(modelo)
@@ -295,7 +295,7 @@ class MotorPyttsx3:
         try:
             import pyttsx3
         except ImportError as error:
-            raise NoInstalado("Falta pyttsx3: pip install -e '.[voz]'") from error
+            raise NoInstalado("Falta pyttsx3: pip install -e .") from error
         self.motor = pyttsx3.init()
         self.motor.setProperty("rate", velocidad)
         voz = _buscar_voz(self.motor.getProperty("voices"), idioma)
@@ -324,7 +324,7 @@ def _audio():
         import numpy as np
         import sounddevice as sd
     except ImportError as error:
-        raise NoInstalado("Faltan sounddevice y numpy: pip install -e '.[voz]'") from error
+        raise NoInstalado("Faltan sounddevice y numpy: pip install -e .") from error
     return sd, np
 
 

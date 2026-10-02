@@ -1,5 +1,6 @@
 """Pruebas sin red: se sustituye el cliente de Claude por uno falso."""
 
+import os
 from types import SimpleNamespace as NS
 
 import pytest
@@ -86,7 +87,7 @@ def test_modo_texto_de_principio_a_fin(monkeypatch, tmp_path, capsys):
     entradas = iter(["hola", "salir"])
     monkeypatch.setattr("builtins.input", lambda _="": next(entradas))
 
-    assert main([]) == 0
+    assert main(["--texto"]) == 0
     salida = capsys.readouterr().out
     assert "JARVIS: Todo en orden, señor." in salida
     assert "Hasta luego" in salida
@@ -147,9 +148,69 @@ def test_modo_texto_con_hud(monkeypatch, tmp_path):
     entradas = iter(["hola", "salir"])
     monkeypatch.setattr("builtins.input", lambda _="": next(entradas))
 
-    assert main(["--hud"]) == 0
+    assert main(["--texto", "--hud"]) == 0
     assert estados == ["hablando", "escuchando", "pensando", "hablando", "escuchando",
                        "hablando", "cerrado"]
+
+
+class _HudFalso:
+    url = "http://127.0.0.1:0/"
+    instancias = 0
+
+    def __init__(self, *_args, **_kwargs):
+        type(self).instancias += 1
+
+    def estado(self, nombre, texto=None):
+        pass
+
+    def nivel(self, valor):
+        pass
+
+    def cerrar(self):
+        pass
+
+
+class _OidoFalso:
+    def __init__(self, *_args, **_kwargs):
+        self._frases = iter(["hola", "salir"])
+
+    def escuchar(self):
+        return next(self._frases)
+
+
+class _HablaFalsa:
+    nombre = "falsa"
+
+    def decir(self, _texto):
+        pass
+
+
+def test_modo_completo_por_defecto_usa_voz_y_hud(monkeypatch, tmp_path):
+    _HudFalso.instancias = 0
+    cliente = ClienteFalso([NS(stop_reason="end_turn", content=[texto("Todo en orden, señor.")])])
+    monkeypatch.setenv("JARVIS_CARPETA_DATOS", str(tmp_path))
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "prueba")
+    monkeypatch.setattr("jarvis.cerebro.anthropic.Anthropic", lambda: cliente)
+    monkeypatch.setattr("jarvis.__main__.Hud", _HudFalso)
+    monkeypatch.setattr("jarvis.voz.oido.Oido", _OidoFalso)
+    monkeypatch.setattr("jarvis.voz.habla.crear_habla", lambda _config: _HablaFalsa())
+
+    assert main([]) == 0
+    assert _HudFalso.instancias == 1  # el HUD se abre solo, sin pasar --hud
+
+
+def test_sin_hud_mantiene_modo_voz(monkeypatch, tmp_path):
+    _HudFalso.instancias = 0
+    cliente = ClienteFalso([NS(stop_reason="end_turn", content=[texto("Todo en orden, señor.")])])
+    monkeypatch.setenv("JARVIS_CARPETA_DATOS", str(tmp_path))
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "prueba")
+    monkeypatch.setattr("jarvis.cerebro.anthropic.Anthropic", lambda: cliente)
+    monkeypatch.setattr("jarvis.__main__.Hud", _HudFalso)
+    monkeypatch.setattr("jarvis.voz.oido.Oido", _OidoFalso)
+    monkeypatch.setattr("jarvis.voz.habla.crear_habla", lambda _config: _HablaFalsa())
+
+    assert main(["--sin-hud"]) == 0
+    assert _HudFalso.instancias == 0  # --sin-hud no abre el HUD, pero la voz sigue activa
 
 
 # --- modo suscripción (Claude Agent SDK) -------------------------------------
@@ -222,9 +283,99 @@ def test_auto_sin_clave_usa_suscripcion(monkeypatch, tmp_path):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.delenv("ANTHROPIC_AUTH_TOKEN", raising=False)
     monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+    monkeypatch.setattr("jarvis.__main__._hay_sesion_claude", lambda: True)
     cerebro = _crear_cerebro(Config(carpeta_datos=tmp_path))
     assert isinstance(cerebro, CerebroSuscripcion)
     cerebro.cerrar()
+
+
+def test_auto_sin_clave_ni_sesion_pide_menu(monkeypatch, tmp_path):
+    from jarvis.__main__ import _crear_cerebro
+
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("ANTHROPIC_AUTH_TOKEN", raising=False)
+    monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+    monkeypatch.setattr("jarvis.__main__._hay_sesion_claude", lambda: False)
+    monkeypatch.setattr("sys.stdin.isatty", lambda: False)
+
+    with pytest.raises(RuntimeError, match="No encuentro"):
+        _crear_cerebro(Config(carpeta_datos=tmp_path))
+
+
+def test_menu_activacion_opcion_api_guarda_env(monkeypatch, tmp_path):
+    from jarvis.__main__ import _menu_activacion
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setattr("builtins.input", lambda _: "1")
+    monkeypatch.setattr("getpass.getpass", lambda _: "sk-ant-prueba")
+
+    assert _menu_activacion() == "api"
+    assert os.environ["ANTHROPIC_API_KEY"] == "sk-ant-prueba"
+    assert "ANTHROPIC_API_KEY=sk-ant-prueba" in (tmp_path / ".env").read_text()
+
+
+def test_menu_activacion_opcion_api_sin_clave_falla(monkeypatch, tmp_path):
+    from jarvis.__main__ import _menu_activacion
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("builtins.input", lambda _: "1")
+    monkeypatch.setattr("getpass.getpass", lambda _: "")
+
+    with pytest.raises(RuntimeError, match="ANTHROPIC_API_KEY"):
+        _menu_activacion()
+
+
+def test_menu_activacion_opcion_suscripcion_sin_sesion(monkeypatch):
+    from jarvis.__main__ import _menu_activacion
+
+    monkeypatch.setattr("builtins.input", lambda _: "2")
+    monkeypatch.setattr("jarvis.__main__._hay_sesion_claude", lambda: False)
+
+    with pytest.raises(RuntimeError, match="sesión"):
+        _menu_activacion()
+
+
+def test_menu_activacion_opcion_suscripcion_con_sesion(monkeypatch):
+    from jarvis.__main__ import _menu_activacion
+
+    monkeypatch.setattr("builtins.input", lambda _: "2")
+    monkeypatch.setattr("jarvis.__main__._hay_sesion_claude", lambda: True)
+
+    assert _menu_activacion() == "suscripcion"
+
+
+def test_menu_activacion_opcion_invalida_falla(monkeypatch):
+    from jarvis.__main__ import _menu_activacion
+
+    monkeypatch.setattr("builtins.input", lambda _: "3")
+
+    with pytest.raises(RuntimeError, match="No encuentro"):
+        _menu_activacion()
+
+
+def test_hay_sesion_claude_detecta_archivo_de_credenciales(monkeypatch, tmp_path):
+    from jarvis.__main__ import _hay_sesion_claude
+
+    monkeypatch.setattr("sys.platform", "linux")
+    monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+    assert _hay_sesion_claude() is False
+
+    (tmp_path / ".claude").mkdir()
+    (tmp_path / ".claude" / ".credentials.json").write_text("{}")
+    assert _hay_sesion_claude() is True
+
+
+def test_guardar_en_env_reemplaza_sin_duplicar(tmp_path):
+    from jarvis.__main__ import _guardar_en_env
+
+    ruta = tmp_path / ".env"
+    ruta.write_text("ANTHROPIC_API_KEY=vieja\nJARVIS_IDIOMA=es\n", encoding="utf-8")
+
+    _guardar_en_env("ANTHROPIC_API_KEY", "nueva", ruta)
+
+    lineas = ruta.read_text(encoding="utf-8").splitlines()
+    assert lineas == ["ANTHROPIC_API_KEY=nueva", "JARVIS_IDIOMA=es"]
 
 
 def _detectar(detector, volumenes):

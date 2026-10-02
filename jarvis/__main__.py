@@ -1,10 +1,15 @@
-"""Punto de entrada: python -m jarvis [--voz] [--silencio] [--pulsar] [--hud]."""
+"""Punto de entrada: python -m jarvis [--texto] [--sin-hud] [--silencio] [--pulsar] [--hud].
+
+Por defecto arranca el modo completo: te escucha, te responde hablando y abre
+la animación HUD. Usa --texto para el modo clásico de escribir y leer.
+"""
 
 from __future__ import annotations
 
 import argparse
-import importlib.util
+import getpass
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -20,14 +25,16 @@ SALIR = {"salir", "adiós", "adios", "exit", "quit"}
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="jarvis", description="Asistente personal tipo Jarvis.")
-    parser.add_argument("--voz", action="store_true",
-                        help="Escuchar por el micrófono y responder hablando (por defecto: modo texto).")
+    parser.add_argument("--texto", action="store_true",
+                        help="Modo texto clásico: escribes y lees, sin voz ni HUD (por defecto: modo completo).")
+    parser.add_argument("--sin-hud", action="store_true",
+                        help="En modo completo (voz), no abrir la animación HUD.")
     parser.add_argument("--silencio", action="store_true",
                         help="En modo voz, responder solo por texto (sin síntesis).")
     parser.add_argument("--pulsar", action="store_true",
                         help="En modo voz, pulsar Enter para hablar en lugar de escuchar siempre.")
     parser.add_argument("--hud", action="store_true",
-                        help="Abrir en el navegador la animación estilo Jarvis (anillos que reaccionan).")
+                        help="Con --texto, abre igual la animación HUD aunque no haya voz.")
     args = parser.parse_args(argv)
 
     config = Config.desde_entorno()
@@ -37,13 +44,16 @@ def main(argv: list[str] | None = None) -> int:
         print(error, file=sys.stderr)
         return 1
 
+    modo_voz = not args.texto
+    usar_hud = (modo_voz and not args.sin_hud) or (not modo_voz and args.hud)
+
     hud = HudNulo()
-    if args.hud:
+    if usar_hud:
         hud = Hud(config.puerto_hud)
         print(f"HUD en {hud.url}")
 
     oido = habla = None
-    if args.voz:
+    if modo_voz:
         from .voz.oido import Oido
         oido = Oido(config.modelo_whisper, config.idioma, hud, pulsar=args.pulsar,
                     palabra_activacion=config.palabra_activacion,
@@ -121,13 +131,15 @@ def _crear_cerebro(config: Config):
     if motor == "auto":
         if _hay_credenciales_api():
             motor = "api"
-        elif importlib.util.find_spec("claude_agent_sdk") is not None:
+        elif _hay_sesion_claude():
             motor = "suscripcion"
+        elif sys.stdin.isatty():
+            motor = _menu_activacion()
         else:
             raise RuntimeError(
                 "No encuentro cómo conectar con Claude. Elige una opción:\n"
                 "  - Clave de API: copia .env.example como .env y pon tu ANTHROPIC_API_KEY.\n"
-                "  - Suscripción Pro/Max: pip install -e '.[suscripcion]' e inicia sesión con `claude`."
+                "  - Suscripción Pro/Max: ejecuta `claude` e inicia sesión con /login."
             )
     if motor in ("suscripcion", "suscripción"):
         from .cerebro_suscripcion import CerebroSuscripcion
@@ -141,6 +153,74 @@ def _crear_cerebro(config: Config):
         return Cerebro(config, herramientas)
     except anthropic.AnthropicError as error:
         raise RuntimeError(f"No puedo conectar con Claude: {error}") from error
+
+
+def _menu_activacion() -> str:
+    """Pregunta cómo conectar con Claude cuando no hay clave ni suscripción listas.
+
+    Solo guía: escribe la clave en .env si el usuario la da, pero no instala
+    paquetes ni ejecuta `claude` por él.
+    """
+    print("No encuentro cómo conectar con Claude. ¿Cómo quieres activarlo?")
+    print("  1) Ya tengo (o voy a pegar ahora) una clave de API")
+    print("  2) Uso mi suscripción Pro/Max de Claude")
+    try:
+        eleccion = input("Elige 1 o 2: ").strip()
+    except (EOFError, KeyboardInterrupt):
+        eleccion = ""
+
+    if eleccion == "1":
+        clave = getpass.getpass("Pega tu ANTHROPIC_API_KEY (de https://console.anthropic.com): ").strip()
+        if not clave:
+            raise RuntimeError("No diste ninguna clave. Copia .env.example como .env y pon tu ANTHROPIC_API_KEY.")
+        _guardar_en_env("ANTHROPIC_API_KEY", clave)
+        os.environ["ANTHROPIC_API_KEY"] = clave
+        print("(clave guardada en .env)")
+        return "api"
+
+    if eleccion == "2":
+        if not _hay_sesion_claude():
+            raise RuntimeError(
+                "Todavía no iniciaste sesión. Hazlo y vuelve a ejecutar python -m jarvis:\n"
+                "  claude   (dentro, escribe /login e inicia sesión con tu cuenta)"
+            )
+        print("(usando tu suscripción de Claude)")
+        return "suscripcion"
+
+    raise RuntimeError(
+        "No encuentro cómo conectar con Claude. Elige una opción:\n"
+        "  - Clave de API: copia .env.example como .env y pon tu ANTHROPIC_API_KEY.\n"
+        "  - Suscripción Pro/Max: ejecuta `claude` e inicia sesión con /login."
+    )
+
+
+def _guardar_en_env(clave: str, valor: str, ruta: Path = Path(".env")) -> None:
+    """Escribe o reemplaza CLAVE=valor en .env, conservando el resto del archivo."""
+    lineas = ruta.read_text(encoding="utf-8").splitlines() if ruta.is_file() else []
+    nueva = f"{clave}={valor}"
+    for i, linea in enumerate(lineas):
+        if linea.strip().startswith(f"{clave}="):
+            lineas[i] = nueva
+            break
+    else:
+        lineas.append(nueva)
+    ruta.write_text("\n".join(lineas) + "\n", encoding="utf-8")
+
+
+def _hay_sesion_claude() -> bool:
+    """Mejor esfuerzo: ¿ya hiciste `claude` -> /login? No hay forma 100% fiable
+    de saberlo sin conectar de verdad, así que mira dónde Claude Code guarda
+    la sesión: el llavero en macOS, un archivo en Linux/Windows."""
+    if sys.platform == "darwin":
+        try:
+            resultado = subprocess.run(
+                ["security", "find-generic-password", "-s", "Claude Code-credentials"],
+                capture_output=True, timeout=5,
+            )
+            return resultado.returncode == 0
+        except (OSError, subprocess.TimeoutExpired):
+            return False
+    return (Path.home() / ".claude" / ".credentials.json").is_file()
 
 
 def _hay_credenciales_api() -> bool:
