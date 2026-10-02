@@ -505,6 +505,28 @@ def test_elegir_voz_macos_prefiere_jorge_premium():
     assert habla_mod.elegir_voz_macos([("Albert", "en_US")], "es") == ""
 
 
+def test_quitar_clics_alisa_salto_brusco():
+    import numpy as np
+
+    audio = np.zeros(1000, dtype=np.float32)
+    audio[500] = 0.9  # salto puntual artificial, como el que produce Kokoro
+
+    resultado = habla_mod._quitar_clics(audio, np, frecuencia=24000)
+
+    assert np.max(np.abs(np.diff(resultado))) < 0.3
+    assert np.array_equal(resultado[:420], audio[:420])  # fuera de la ventana, intacto
+    assert np.array_equal(resultado[580:], audio[580:])
+
+
+def test_quitar_clics_no_toca_audio_limpio():
+    import numpy as np
+
+    audio = np.sin(np.linspace(0, 20, 1000)).astype(np.float32) * 0.3
+    resultado = habla_mod._quitar_clics(audio, np, frecuencia=24000)
+
+    assert np.array_equal(resultado, audio)
+
+
 def test_crear_habla_elige_motor(monkeypatch, tmp_path):
     creados = []
 
