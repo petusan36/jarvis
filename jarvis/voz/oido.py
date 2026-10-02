@@ -82,7 +82,7 @@ class Oido:
             from faster_whisper import WhisperModel
         except ImportError as error:
             raise RuntimeError(
-                "Falta el soporte de voz. Instálalo con: pip install -e '.[voz]'"
+                "Falta el soporte de voz. Instálalo con: pip install -e ."
             ) from error
         self.idioma = idioma
         self.hud = hud or HudNulo()
