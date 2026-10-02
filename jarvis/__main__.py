@@ -204,7 +204,12 @@ def _guardar_en_env(clave: str, valor: str, ruta: Path = Path(".env")) -> None:
             break
     else:
         lineas.append(nueva)
-    ruta.write_text("\n".join(lineas) + "\n", encoding="utf-8")
+    contenido = "\n".join(lineas) + "\n"
+    if ruta.is_file():
+        os.chmod(ruta, 0o600)  # ya existía con permisos más abiertos: cerrarlos antes de escribir
+    descriptor = os.open(str(ruta), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(descriptor, "w", encoding="utf-8") as archivo:
+        archivo.write(contenido)
 
 
 def _hay_sesion_claude() -> bool:
