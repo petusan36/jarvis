@@ -202,11 +202,22 @@ python -m jarvis --texto --hud    # modo texto, con HUD
 | En espera | anillos azules girando despacio, el núcleo respira |
 | Escuchando | barras alrededor del anillo que vibran con el volumen del micrófono |
 | Procesando | los anillos aceleran, se vuelven dorados y aparecen órbitas de escaneo |
-| Respondiendo | el núcleo late como si hablara y se muestra la respuesta |
+| Respondiendo | el núcleo late como si hablara |
 
-No necesita instalar nada: Jarvis sirve la página en `http://127.0.0.1:8765`
-(cámbialo con `JARVIS_PUERTO_HUD`). Pulsa F11 en el navegador para verla a
-pantalla completa.
+No necesita instalar nada extra: Jarvis sirve la página en
+`http://127.0.0.1:8765` (cámbialo con `JARVIS_PUERTO_HUD`).
+
+**En macOS**, se abre sola como una ventana flotante nativa: sin marco, sin
+botones, fondo transparente (se ve el escritorio detrás) y sin texto —
+solo los anillos, como un widget que flota sobre todo lo demás. Chica,
+proporcional al tamaño de tu pantalla, y siempre arriba a la izquierda. Se
+puede arrastrar agarrando cualquier parte (no tiene barra de título). No
+aparece en el Dock ni en el selector de apps — para cerrarla, cerrá Jarvis
+(decile "cerrate").
+
+En Windows y Linux, por ahora sigue abriéndose como ventana de Chrome en modo
+app (sin pestañas ni barra de direcciones, pero con el marco normal) o, sin
+Chrome instalado, como pestaña del navegador.
 
 ## App de escritorio
 
@@ -309,6 +320,7 @@ jarvis/
 ├── config.py        configuración desde .env
 ├── escritorio.py    ícono de escritorio (--instalar-app)
 ├── hud/             animación estilo Jarvis (servidor local + hud.html)
+│   └── ventana_macos.py  ventana flotante nativa sin marco (macOS, PyObjC)
 └── voz/
     ├── oido.py      micrófono + Whisper (faster-whisper)
     └── habla.py     síntesis de voz (elevenlabs, kokoro, piper, macos, pyttsx3)

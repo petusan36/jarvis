@@ -20,6 +20,8 @@ dependencies = [
     "kokoro>=0.9.4",
     "soundfile>=0.12",
     "pypdf>=5.0",
+    "pyobjc-framework-Cocoa>=10.0; sys_platform == 'darwin'",
+    "pyobjc-framework-WebKit>=10.0; sys_platform == 'darwin'",
 ]
 
 [project.optional-dependencies]

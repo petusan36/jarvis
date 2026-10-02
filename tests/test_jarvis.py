@@ -248,6 +248,31 @@ def test_modo_completo_por_defecto_usa_voz_y_hud(monkeypatch, tmp_path):
     assert _HudFalso.instancias == 1  # el HUD se abre solo, sin pasar --hud
 
 
+def test_usa_ventana_nativa_si_esta_disponible_en_macos(monkeypatch, tmp_path):
+    cliente = ClienteFalso([NS(stop_reason="end_turn", content=[texto("Todo en orden, señor.")])])
+    monkeypatch.setenv("JARVIS_CARPETA_DATOS", str(tmp_path))
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "prueba")
+    monkeypatch.setattr("jarvis.cerebro.anthropic.Anthropic", lambda: cliente)
+    monkeypatch.setattr("sys.platform", "darwin")
+    monkeypatch.setattr("jarvis.hud.ventana_macos.disponible", lambda: True)
+    monkeypatch.setattr("jarvis.__main__.Hud", _HudFalso)
+    monkeypatch.setattr("jarvis.voz.oido.Oido", _OidoFalso)
+    monkeypatch.setattr("jarvis.voz.habla.crear_habla", lambda _config: _HablaFalsa())
+
+    llamadas = []
+
+    def ejecutar_con_ventana_flotante_falso(url, trabajo):
+        llamadas.append(url)
+        trabajo()  # sin hilo ni NSApp.run(): corre el bucle directo, en el mismo hilo
+
+    monkeypatch.setattr(
+        "jarvis.hud.ventana_macos.ejecutar_con_ventana_flotante", ejecutar_con_ventana_flotante_falso
+    )
+
+    assert main([]) == 0
+    assert len(llamadas) == 1 and llamadas[0] == _HudFalso.url
+
+
 def test_sin_hud_mantiene_modo_voz(monkeypatch, tmp_path):
     _HudFalso.instancias = 0
     cliente = ClienteFalso([NS(stop_reason="end_turn", content=[texto("Todo en orden, señor.")])])

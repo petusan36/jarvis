@@ -70,10 +70,30 @@ def _ejecutar(args, config: Config, cerebro) -> int:
     usar_hud = (modo_voz and not args.sin_hud) or (not modo_voz and args.hud)
 
     hud = HudNulo()
+    ventana_nativa_url = None
     if usar_hud:
-        hud = Hud(config.puerto_hud)
+        from .hud import ventana_macos
+        nativa = sys.platform == "darwin" and ventana_macos.disponible()
+        hud = Hud(config.puerto_hud, abrir_navegador=not nativa)
         print(f"HUD en {hud.url}")
+        if nativa:
+            ventana_nativa_url = hud.url
 
+    if ventana_nativa_url:
+        from .hud import ventana_macos
+        resultado = {}
+
+        def trabajo() -> None:
+            resultado["codigo"] = _bucle_conversacion(args, config, cerebro, hud)
+
+        ventana_macos.ejecutar_con_ventana_flotante(ventana_nativa_url, trabajo)
+        return resultado.get("codigo", 0)
+
+    return _bucle_conversacion(args, config, cerebro, hud)
+
+
+def _bucle_conversacion(args, config: Config, cerebro, hud: HudNulo) -> int:
+    modo_voz = not args.texto
     oido = habla = None
     if modo_voz:
         from .voz.oido import Oido
