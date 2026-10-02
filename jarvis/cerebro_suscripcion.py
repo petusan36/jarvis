@@ -29,7 +29,7 @@ class CerebroSuscripcion:
             import claude_agent_sdk  # noqa: F401
         except ImportError as error:
             raise RuntimeError(
-                "Falta el modo suscripción. Instálalo con: pip install -e '.[suscripcion]'"
+                "Falta el modo suscripción. Instálalo con: pip install -e ."
             ) from error
         self.config = config
         self.herramientas = herramientas

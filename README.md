@@ -37,11 +37,11 @@ micrófono ──► Whisper (oido.py) ──► Claude + herramientas (cerebro.
 
 ## Instalación
 
-Un único comando instala todo lo que pip puede instalar: texto, voz (los
-cuatro motores locales) y el soporte para usar tu suscripción Pro/Max. Luego,
-al arrancar, todo lo demás se maneja desde la propia aplicación — qué modo
-usar, y cómo conectar con Claude si todavía no lo configuraste (ver más abajo).
-Las dependencias de desarrollo (`pytest`) son aparte, ver [Pruebas](#pruebas).
+Un único comando sin extras: `pip install -e .` ya trae todo (texto, voz con
+los cuatro motores locales, y el soporte para usar tu suscripción Pro/Max).
+Todo lo demás — qué modo usar, y cómo conectar con Claude — se decide después,
+desde la propia aplicación (ver más abajo). Las dependencias de desarrollo
+(`pytest`) son aparte, ver [Pruebas](#pruebas).
 
 | Sistema | Dependencias | Comando |
 |---|---|---|
@@ -54,9 +54,7 @@ git clone git@github.com:petusan36/jarvis.git jarvis
 cd jarvis
 python3.12 -m venv .venv          # usa EXACTO 3.12 (ver Requisitos arriba)
 source .venv/bin/activate        # En Windows: .venv\Scripts\activate
-pip install -e '.[voz,voz-natural,voz-kokoro,suscripcion]'
-
-cp .env.example .env             # y pon tu clave en ANTHROPIC_API_KEY (o deja esto para el paso siguiente)
+pip install -e .
 ```
 
 Si al instalar ves `ERROR: Could not find a version that satisfies the
@@ -69,18 +67,21 @@ equivocada: borralo (`rm -rf .venv`) y repetí desde `python3.12 -m venv .venv`.
 python -m jarvis
 ```
 
-Al primer arranque, si no hay `ANTHROPIC_API_KEY` ni sesión de Claude Code,
-Jarvis te pregunta ahí mismo cuál de las dos usar:
+Al primer arranque, Jarvis valida solo cómo conectar con Claude:
 
-1. **Clave de API**: la pegas y Jarvis la guarda en `.env` por vos.
-2. **Suscripción Pro/Max**: ya tienes instalado el soporte (quedó en el `pip
-   install` de arriba); solo falta `npm` y loguearte una vez, algo que pip no
-   puede hacer por vos:
-   ```bash
-   npm install -g @anthropic-ai/claude-code   # o el instalador de https://claude.com/claude-code
-   claude                                      # dentro, escribe /login e inicia sesión con tu cuenta
-   ```
-   Hazlo y vuelve a ejecutar `python -m jarvis`.
+- Si encuentra `ANTHROPIC_API_KEY` en tu entorno o `.env`, usa la API.
+- Si detecta que ya iniciaste sesión en Claude Code (`claude` → `/login`), usa
+  tu suscripción Pro/Max.
+- Si no encuentra ninguna de las dos, te pregunta ahí mismo:
+  1. **Clave de API**: la pegas y Jarvis la guarda en `.env` por vos.
+  2. **Suscripción Pro/Max**: el soporte ya está instalado (no es un extra
+     aparte); solo falta que inicies sesión, algo que pip no puede hacer por
+     vos:
+     ```bash
+     npm install -g @anthropic-ai/claude-code   # o el instalador de https://claude.com/claude-code
+     claude                                      # dentro, escribe /login e inicia sesión con tu cuenta
+     ```
+     Hazlo y vuelve a ejecutar `python -m jarvis`.
 
 Una vez configurado cualquiera de los dos, Jarvis lo detecta solo en cada
 arranque (o fuérzalo con `JARVIS_MOTOR=api` / `JARVIS_MOTOR=suscripcion`).

@@ -283,9 +283,23 @@ def test_auto_sin_clave_usa_suscripcion(monkeypatch, tmp_path):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.delenv("ANTHROPIC_AUTH_TOKEN", raising=False)
     monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+    monkeypatch.setattr("jarvis.__main__._hay_sesion_claude", lambda: True)
     cerebro = _crear_cerebro(Config(carpeta_datos=tmp_path))
     assert isinstance(cerebro, CerebroSuscripcion)
     cerebro.cerrar()
+
+
+def test_auto_sin_clave_ni_sesion_pide_menu(monkeypatch, tmp_path):
+    from jarvis.__main__ import _crear_cerebro
+
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("ANTHROPIC_AUTH_TOKEN", raising=False)
+    monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+    monkeypatch.setattr("jarvis.__main__._hay_sesion_claude", lambda: False)
+    monkeypatch.setattr("sys.stdin.isatty", lambda: False)
+
+    with pytest.raises(RuntimeError, match="No encuentro"):
+        _crear_cerebro(Config(carpeta_datos=tmp_path))
 
 
 def test_menu_activacion_opcion_api_guarda_env(monkeypatch, tmp_path):
@@ -312,21 +326,21 @@ def test_menu_activacion_opcion_api_sin_clave_falla(monkeypatch, tmp_path):
         _menu_activacion()
 
 
-def test_menu_activacion_opcion_suscripcion_sin_sdk_instalado(monkeypatch):
+def test_menu_activacion_opcion_suscripcion_sin_sesion(monkeypatch):
     from jarvis.__main__ import _menu_activacion
 
     monkeypatch.setattr("builtins.input", lambda _: "2")
-    monkeypatch.setattr("jarvis.__main__.importlib.util.find_spec", lambda _: None)
+    monkeypatch.setattr("jarvis.__main__._hay_sesion_claude", lambda: False)
 
-    with pytest.raises(RuntimeError, match="suscripcion"):
+    with pytest.raises(RuntimeError, match="sesión"):
         _menu_activacion()
 
 
-def test_menu_activacion_opcion_suscripcion_con_sdk_instalado(monkeypatch):
+def test_menu_activacion_opcion_suscripcion_con_sesion(monkeypatch):
     from jarvis.__main__ import _menu_activacion
 
     monkeypatch.setattr("builtins.input", lambda _: "2")
-    monkeypatch.setattr("jarvis.__main__.importlib.util.find_spec", lambda _: object())
+    monkeypatch.setattr("jarvis.__main__._hay_sesion_claude", lambda: True)
 
     assert _menu_activacion() == "suscripcion"
 
@@ -338,6 +352,18 @@ def test_menu_activacion_opcion_invalida_falla(monkeypatch):
 
     with pytest.raises(RuntimeError, match="No encuentro"):
         _menu_activacion()
+
+
+def test_hay_sesion_claude_detecta_archivo_de_credenciales(monkeypatch, tmp_path):
+    from jarvis.__main__ import _hay_sesion_claude
+
+    monkeypatch.setattr("sys.platform", "linux")
+    monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+    assert _hay_sesion_claude() is False
+
+    (tmp_path / ".claude").mkdir()
+    (tmp_path / ".claude" / ".credentials.json").write_text("{}")
+    assert _hay_sesion_claude() is True
 
 
 def test_guardar_en_env_reemplaza_sin_duplicar(tmp_path):
