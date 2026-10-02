@@ -1,4 +1,8 @@
-"""Punto de entrada: python -m jarvis [--voz] [--silencio] [--pulsar] [--hud]."""
+"""Punto de entrada: python -m jarvis [--texto] [--sin-hud] [--silencio] [--pulsar] [--hud].
+
+Por defecto arranca el modo completo: te escucha, te responde hablando y abre
+la animación HUD. Usa --texto para el modo clásico de escribir y leer.
+"""
 
 from __future__ import annotations
 
@@ -21,14 +25,16 @@ SALIR = {"salir", "adiós", "adios", "exit", "quit"}
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="jarvis", description="Asistente personal tipo Jarvis.")
-    parser.add_argument("--voz", action="store_true",
-                        help="Escuchar por el micrófono y responder hablando (por defecto: modo texto).")
+    parser.add_argument("--texto", action="store_true",
+                        help="Modo texto clásico: escribes y lees, sin voz ni HUD (por defecto: modo completo).")
+    parser.add_argument("--sin-hud", action="store_true",
+                        help="En modo completo (voz), no abrir la animación HUD.")
     parser.add_argument("--silencio", action="store_true",
                         help="En modo voz, responder solo por texto (sin síntesis).")
     parser.add_argument("--pulsar", action="store_true",
                         help="En modo voz, pulsar Enter para hablar en lugar de escuchar siempre.")
     parser.add_argument("--hud", action="store_true",
-                        help="Abrir en el navegador la animación estilo Jarvis (anillos que reaccionan).")
+                        help="Con --texto, abre igual la animación HUD aunque no haya voz.")
     args = parser.parse_args(argv)
 
     config = Config.desde_entorno()
@@ -38,13 +44,16 @@ def main(argv: list[str] | None = None) -> int:
         print(error, file=sys.stderr)
         return 1
 
+    modo_voz = not args.texto
+    usar_hud = (modo_voz and not args.sin_hud) or (not modo_voz and args.hud)
+
     hud = HudNulo()
-    if args.hud:
+    if usar_hud:
         hud = Hud(config.puerto_hud)
         print(f"HUD en {hud.url}")
 
     oido = habla = None
-    if args.voz:
+    if modo_voz:
         from .voz.oido import Oido
         oido = Oido(config.modelo_whisper, config.idioma, hud, pulsar=args.pulsar,
                     palabra_activacion=config.palabra_activacion,
