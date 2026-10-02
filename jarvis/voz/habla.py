@@ -24,6 +24,11 @@ from pathlib import Path
 
 MOTORES = ("elevenlabs", "kokoro", "piper", "macos", "pyttsx3")
 
+# "high" del sistema son ~28ms en muchos Mac: no alcanza para absorber picos de
+# CPU (Kokoro, Chrome del HUD) y se oyen clicks tipo "interferencia". Medio
+# segundo es imperceptible para arrancar a hablar y da mucho más margen.
+LATENCIA_SALIDA = 0.5
+
 # Voz de Piper por defecto: hombre, español de España, tono sereno.
 VOZ_PIPER = "es_ES-davefx-medium"
 # Voz de Kokoro por defecto: "Alex", voz masculina en español (modelo abierto Apache-2.0,
@@ -160,7 +165,7 @@ class MotorElevenLabs:
         except urllib.error.HTTPError as error:
             raise RuntimeError(f"ElevenLabs respondió {error.code}") from error
         muestras = self.np.frombuffer(pcm, dtype=self.np.int16)
-        self.sd.play(muestras, self.frecuencia, latency="high")
+        self.sd.play(muestras, self.frecuencia, latency=LATENCIA_SALIDA)
         self.sd.wait()
 
 
@@ -187,7 +192,7 @@ class MotorKokoro:
         if not trozos:
             return
         audio = _quitar_clics(self.np.concatenate(trozos), self.np, self.frecuencia)
-        self.sd.play(audio, self.frecuencia, latency="high")
+        self.sd.play(audio, self.frecuencia, latency=LATENCIA_SALIDA)
         self.sd.wait()
 
 
@@ -225,7 +230,7 @@ class MotorPiper:
         trozos = [t.audio_float_array for t in self.voz.synthesize(texto, syn_config=self.ajustes)]
         if not trozos:
             return
-        self.sd.play(self.np.concatenate(trozos), self.voz.config.sample_rate, latency="high")
+        self.sd.play(self.np.concatenate(trozos), self.voz.config.sample_rate, latency=LATENCIA_SALIDA)
         self.sd.wait()
 
 
