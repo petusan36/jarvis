@@ -73,7 +73,9 @@ Al primer arranque, Jarvis valida solo cómo conectar con Claude:
 - Si detecta que ya iniciaste sesión en Claude Code (`claude` → `/login`), usa
   tu suscripción Pro/Max.
 - Si no encuentra ninguna de las dos, te pregunta ahí mismo:
-  1. **Clave de API**: la pegas y Jarvis la guarda en `.env` por vos.
+  1. **Clave de API**: la pegas y queda activa solo para esta ejecución, en
+     memoria — no se guarda en ningún archivo. Te la va a volver a pedir la
+     próxima vez. Si no quieres repetirlo, ponla vos mismo en `.env`.
   2. **Suscripción Pro/Max**: el soporte ya está instalado (no es un extra
      aparte); solo falta que inicies sesión, algo que pip no puede hacer por
      vos:
