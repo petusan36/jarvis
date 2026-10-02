@@ -12,9 +12,24 @@ micrófono ──► Whisper (oido.py) ──► Claude + herramientas (cerebro.
 
 ## Requisitos
 
-- Python 3.10, 3.11 o 3.12 (Kokoro, uno de los motores de voz, todavía no
-  soporta 3.13 ni 3.14; si ya tienes una versión más nueva, instala 3.12 aparte
-  solo para este proyecto)
+> ⚠️ **Tiene que ser Python 3.10, 3.11 o 3.12 — ni uno más nuevo.** Kokoro (uno
+> de los motores de voz) todavía no soporta 3.13 ni 3.14. Si creas el `.venv`
+> con una versión más nueva, `pip install` falla al buscar `kokoro` y no avisa
+> por qué. Comprueba tu versión por defecto antes de seguir:
+>
+> ```bash
+> python3 --version
+> ```
+>
+> Si te da 3.13 o más, instala 3.12 aparte (no reemplaza tu Python del
+> sistema) y úsalo solo para crear el `.venv` de este proyecto:
+>
+> | Sistema | Comando |
+> |---|---|
+> | macOS | `brew install python@3.12` |
+> | Ubuntu / Debian | `sudo apt install python3.12 python3.12-venv` |
+> | Windows | instala 3.12 desde <https://python.org/downloads> (marca "Add to PATH") |
+
 - Una de estas dos formas de conectar con Claude:
   - **Clave de API** (pago por uso): créala en <https://console.anthropic.com>
   - **Tu suscripción Pro o Max**, a través de Claude Code (ver más abajo)
@@ -36,12 +51,16 @@ de desarrollo (`pytest`) son aparte, ver [Pruebas](#pruebas).
 ```bash
 git clone git@github.com:petusan36/jarvis.git jarvis
 cd jarvis
-python -m venv .venv
+python3.12 -m venv .venv          # usa EXACTO 3.12 (ver Requisitos arriba)
 source .venv/bin/activate        # En Windows: .venv\Scripts\activate
 pip install -e '.[voz,voz-natural,voz-kokoro]'
 
 cp .env.example .env             # y pon tu clave en ANTHROPIC_API_KEY
 ```
+
+Si al instalar ves `ERROR: Could not find a version that satisfies the
+requirement kokoro`, tu `.venv` quedó creado con una versión de Python
+equivocada: borralo (`rm -rf .venv`) y repetí desde `python3.12 -m venv .venv`.
 
 ## Usar tu suscripción de Claude (sin clave de API)
 
