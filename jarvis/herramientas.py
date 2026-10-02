@@ -41,15 +41,21 @@ class Herramienta:
 class Herramientas:
     """Registro de herramientas disponibles para una sesión."""
 
-    def __init__(self, carpeta_datos: Path, sistema: bool = True):
+    def __init__(self, carpeta_datos: Path, sistema: bool = True, youtube_api_key: str = ""):
         self.carpeta_datos = carpeta_datos
         self._registro: dict[str, Herramienta] = {}
         # Cuenta los mensajes del usuario; sirve para exigir confirmaciones en un mensaje aparte.
         self.turno = 0
+        # El bucle principal revisa esto después de cada respuesta para saber si debe terminar.
+        self.salir_pedido = False
         self._registrar_basicas()
         if sistema:
             from .sistema import registrar_sistema
             registrar_sistema(self)
+        from .musica import registrar_musica
+        registrar_musica(self, youtube_api_key)
+        from .web import registrar_web
+        registrar_web(self)
 
     def nuevo_turno(self) -> None:
         """Avisa de que ha llegado un mensaje nuevo del usuario."""
@@ -117,6 +123,18 @@ class Herramientas:
             if not notas:
                 return "No hay notas guardadas."
             return "\n".join(f"- [{n['fecha']}] {n['texto']}" for n in notas)
+
+        @self.registrar(
+            "cerrar_jarvis",
+            "Cierra Jarvis. Úsala cuando el usuario pida salir, cerrar la aplicación, "
+            "terminar, o se despida dejando claro que ya terminó (por ejemplo 'cerrate', "
+            "'listo, salí de la app', 'ya terminamos por hoy'). No hace falta confirmar: "
+            "a diferencia de cerrar otra aplicación, aquí no hay nada que perder.",
+            {},
+        )
+        def cerrar_jarvis() -> str:
+            self.salir_pedido = True
+            return "Cerrando Jarvis."
 
     def _ruta_notas(self) -> Path:
         return self.carpeta_datos / "notas.json"

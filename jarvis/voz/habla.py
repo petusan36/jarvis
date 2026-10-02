@@ -24,6 +24,11 @@ from pathlib import Path
 
 MOTORES = ("elevenlabs", "kokoro", "piper", "macos", "pyttsx3")
 
+# "high" del sistema son ~28ms en muchos Mac: no alcanza para absorber picos de
+# CPU (Kokoro, Chrome del HUD) y se oyen clicks tipo "interferencia". Medio
+# segundo es imperceptible para arrancar a hablar y da mucho más margen.
+LATENCIA_SALIDA = 0.5
+
 # Voz de Piper por defecto: hombre, español de España, tono sereno.
 VOZ_PIPER = "es_ES-davefx-medium"
 # Voz de Kokoro por defecto: "Alex", voz masculina en español (modelo abierto Apache-2.0,
@@ -160,7 +165,7 @@ class MotorElevenLabs:
         except urllib.error.HTTPError as error:
             raise RuntimeError(f"ElevenLabs respondió {error.code}") from error
         muestras = self.np.frombuffer(pcm, dtype=self.np.int16)
-        self.sd.play(muestras, self.frecuencia)
+        self.sd.play(muestras, self.frecuencia, latency=LATENCIA_SALIDA)
         self.sd.wait()
 
 
@@ -186,8 +191,25 @@ class MotorKokoro:
         trozos = [audio for _, _, audio in self.pipeline(texto, voice=self.voz, speed=self.velocidad)]
         if not trozos:
             return
-        self.sd.play(self.np.concatenate(trozos), self.frecuencia)
+        audio = _quitar_clics(self.np.concatenate(trozos), self.np, self.frecuencia)
+        self.sd.play(audio, self.frecuencia, latency=LATENCIA_SALIDA)
         self.sd.wait()
+
+
+def _quitar_clics(audio, np, frecuencia: int, umbral: float = 0.3, ventana_ms: float = 6.0):
+    """Alisa saltos bruscos de una sola muestra: artefactos puntuales que a veces
+    produce Kokoro en español (vía el respaldo fonético de espeak-ng), sonando
+    como un click o interferencia. Interpola linealmente una ventana breve
+    alrededor de cada salto; no toca el resto del audio."""
+    saltos = np.where(np.abs(np.diff(audio)) > umbral)[0]
+    if len(saltos) == 0:
+        return audio
+    audio = audio.copy()
+    medio = max(1, int(frecuencia * ventana_ms / 1000 / 2))
+    for i in saltos:
+        inicio, fin = max(0, i - medio), min(len(audio), i + medio + 1)
+        audio[inicio:fin] = np.linspace(audio[inicio], audio[fin - 1], fin - inicio)
+    return audio
 
 
 class MotorPiper:
@@ -208,7 +230,7 @@ class MotorPiper:
         trozos = [t.audio_float_array for t in self.voz.synthesize(texto, syn_config=self.ajustes)]
         if not trozos:
             return
-        self.sd.play(self.np.concatenate(trozos), self.voz.config.sample_rate)
+        self.sd.play(self.np.concatenate(trozos), self.voz.config.sample_rate, latency=LATENCIA_SALIDA)
         self.sd.wait()
 
 

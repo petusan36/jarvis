@@ -51,6 +51,13 @@ def test_notas(herramientas):
     assert "comprar leche" in salida and not error
 
 
+def test_cerrar_jarvis_marca_salida_pedida(herramientas):
+    assert herramientas.salir_pedido is False
+    salida, error = herramientas.ejecutar("cerrar_jarvis", {})
+    assert not error
+    assert herramientas.salir_pedido is True
+
+
 def test_herramienta_desconocida(herramientas):
     assert herramientas.ejecutar("volar", {})[1] is True
 
@@ -93,6 +100,23 @@ def test_modo_texto_de_principio_a_fin(monkeypatch, tmp_path, capsys):
     assert "Hasta luego" in salida
 
 
+def test_jarvis_se_cierra_solo_por_decision_de_claude(monkeypatch, tmp_path, capsys):
+    cliente = ClienteFalso([
+        NS(stop_reason="tool_use", content=[uso("cerrar_jarvis", {})]),
+        NS(stop_reason="end_turn", content=[texto("Hasta luego, señor.")]),
+    ])
+    monkeypatch.setenv("JARVIS_CARPETA_DATOS", str(tmp_path))
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "prueba")
+    monkeypatch.setattr("jarvis.cerebro.anthropic.Anthropic", lambda: cliente)
+    entradas = iter(["ya terminamos por hoy, cerrate"])  # nunca dice "salir" literal
+    monkeypatch.setattr("builtins.input", lambda _="": next(entradas))
+
+    # Si no cortara el bucle, el segundo input() agotaría el iterador y fallaría el test.
+    assert main(["--texto"]) == 0
+    salida = capsys.readouterr().out
+    assert "JARVIS: Hasta luego, señor." in salida
+
+
 def test_hud_envia_estados_al_navegador():
     import json
     import urllib.request
@@ -120,6 +144,31 @@ def test_hud_envia_estados_al_navegador():
             hud.estado("bailando")
     finally:
         hud.cerrar()
+
+
+def test_abrir_ventana_app_usa_chrome_si_esta(monkeypatch):
+    from jarvis import hud as hud_mod
+
+    llamadas = []
+    monkeypatch.setattr(hud_mod, "_navegador_con_modo_app", lambda: "/usr/bin/chrome")
+    monkeypatch.setattr(hud_mod.subprocess, "Popen", lambda args, **kw: llamadas.append(args))
+    monkeypatch.setattr(hud_mod.webbrowser, "open", lambda url: pytest.fail("no debería caer a pestaña"))
+
+    hud_mod._abrir_ventana_app("http://127.0.0.1:8765/")
+
+    assert llamadas == [["/usr/bin/chrome", "--app=http://127.0.0.1:8765/", "--window-size=480,480"]]
+
+
+def test_abrir_ventana_app_cae_a_pestana_sin_navegador(monkeypatch):
+    from jarvis import hud as hud_mod
+
+    abiertas = []
+    monkeypatch.setattr(hud_mod, "_navegador_con_modo_app", lambda: None)
+    monkeypatch.setattr(hud_mod.webbrowser, "open", lambda url: abiertas.append(url))
+
+    hud_mod._abrir_ventana_app("http://127.0.0.1:8765/")
+
+    assert abiertas == ["http://127.0.0.1:8765/"]
 
 
 def test_modo_texto_con_hud(monkeypatch, tmp_path):
@@ -197,6 +246,31 @@ def test_modo_completo_por_defecto_usa_voz_y_hud(monkeypatch, tmp_path):
 
     assert main([]) == 0
     assert _HudFalso.instancias == 1  # el HUD se abre solo, sin pasar --hud
+
+
+def test_usa_ventana_nativa_si_esta_disponible_en_macos(monkeypatch, tmp_path):
+    cliente = ClienteFalso([NS(stop_reason="end_turn", content=[texto("Todo en orden, señor.")])])
+    monkeypatch.setenv("JARVIS_CARPETA_DATOS", str(tmp_path))
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "prueba")
+    monkeypatch.setattr("jarvis.cerebro.anthropic.Anthropic", lambda: cliente)
+    monkeypatch.setattr("sys.platform", "darwin")
+    monkeypatch.setattr("jarvis.hud.ventana_macos.disponible", lambda: True)
+    monkeypatch.setattr("jarvis.__main__.Hud", _HudFalso)
+    monkeypatch.setattr("jarvis.voz.oido.Oido", _OidoFalso)
+    monkeypatch.setattr("jarvis.voz.habla.crear_habla", lambda _config: _HablaFalsa())
+
+    llamadas = []
+
+    def ejecutar_con_ventana_flotante_falso(url, trabajo):
+        llamadas.append(url)
+        trabajo()  # sin hilo ni NSApp.run(): corre el bucle directo, en el mismo hilo
+
+    monkeypatch.setattr(
+        "jarvis.hud.ventana_macos.ejecutar_con_ventana_flotante", ejecutar_con_ventana_flotante_falso
+    )
+
+    assert main([]) == 0
+    assert len(llamadas) == 1 and llamadas[0] == _HudFalso.url
 
 
 def test_sin_hud_mantiene_modo_voz(monkeypatch, tmp_path):
@@ -354,6 +428,43 @@ def test_menu_activacion_opcion_invalida_falla(monkeypatch):
         _menu_activacion()
 
 
+def test_instancia_unica_primera_vez_toma_el_lock(tmp_path):
+    from jarvis.__main__ import _liberar_instancia, _tomar_instancia_unica
+
+    assert _tomar_instancia_unica(tmp_path) is True
+    assert (tmp_path / "jarvis.pid").is_file()
+    _liberar_instancia(tmp_path)
+    assert not (tmp_path / "jarvis.pid").exists()
+
+
+def test_instancia_unica_rechaza_si_ya_hay_una_viva(tmp_path):
+    import os
+
+    from jarvis.__main__ import _tomar_instancia_unica
+
+    (tmp_path / "jarvis.pid").write_text(str(os.getpid()))  # este mismo proceso: siempre vivo
+
+    assert _tomar_instancia_unica(tmp_path) is False
+
+
+def test_instancia_unica_ignora_pid_de_proceso_muerto(tmp_path):
+    from jarvis.__main__ import _tomar_instancia_unica
+
+    (tmp_path / "jarvis.pid").write_text("999999999")  # casi seguro no existe
+
+    assert _tomar_instancia_unica(tmp_path) is True
+
+
+def test_liberar_instancia_no_borra_el_pid_de_otra_instancia(tmp_path):
+    from jarvis.__main__ import _liberar_instancia
+
+    (tmp_path / "jarvis.pid").write_text("1")  # pid ajeno
+
+    _liberar_instancia(tmp_path)
+
+    assert (tmp_path / "jarvis.pid").read_text() == "1"
+
+
 def test_hay_sesion_claude_detecta_archivo_de_credenciales(monkeypatch, tmp_path):
     from jarvis.__main__ import _hay_sesion_claude
 
@@ -478,6 +589,28 @@ def test_elegir_voz_macos_prefiere_jorge_premium():
     assert habla_mod.elegir_voz_macos(voces, "es") == "Jorge (Premium)"
     assert habla_mod.elegir_voz_macos([("Mónica", "es_ES")], "es") == "Mónica"
     assert habla_mod.elegir_voz_macos([("Albert", "en_US")], "es") == ""
+
+
+def test_quitar_clics_alisa_salto_brusco():
+    import numpy as np
+
+    audio = np.zeros(1000, dtype=np.float32)
+    audio[500] = 0.9  # salto puntual artificial, como el que produce Kokoro
+
+    resultado = habla_mod._quitar_clics(audio, np, frecuencia=24000)
+
+    assert np.max(np.abs(np.diff(resultado))) < 0.3
+    assert np.array_equal(resultado[:420], audio[:420])  # fuera de la ventana, intacto
+    assert np.array_equal(resultado[580:], audio[580:])
+
+
+def test_quitar_clics_no_toca_audio_limpio():
+    import numpy as np
+
+    audio = np.sin(np.linspace(0, 20, 1000)).astype(np.float32) * 0.3
+    resultado = habla_mod._quitar_clics(audio, np, frecuencia=24000)
+
+    assert np.array_equal(resultado, audio)
 
 
 def test_crear_habla_elige_motor(monkeypatch, tmp_path):

@@ -38,6 +38,7 @@ class Config:
     elevenlabs_api_key: str = ""
     elevenlabs_voz: str = ""
     elevenlabs_modelo: str = ""
+    youtube_api_key: str = ""  # opcional: sin ella, "reproducir música" abre los resultados y elige el usuario
 
     @classmethod
     def desde_entorno(cls) -> "Config":
@@ -61,4 +62,5 @@ class Config:
             elevenlabs_api_key=os.getenv("ELEVENLABS_API_KEY", base.elevenlabs_api_key),
             elevenlabs_voz=os.getenv("JARVIS_ELEVENLABS_VOZ", base.elevenlabs_voz),
             elevenlabs_modelo=os.getenv("JARVIS_ELEVENLABS_MODELO", base.elevenlabs_modelo),
+            youtube_api_key=os.getenv("YOUTUBE_API_KEY", base.youtube_api_key),
         )
