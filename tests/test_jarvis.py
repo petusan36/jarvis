@@ -122,6 +122,31 @@ def test_hud_envia_estados_al_navegador():
         hud.cerrar()
 
 
+def test_abrir_ventana_app_usa_chrome_si_esta(monkeypatch):
+    from jarvis import hud as hud_mod
+
+    llamadas = []
+    monkeypatch.setattr(hud_mod, "_navegador_con_modo_app", lambda: "/usr/bin/chrome")
+    monkeypatch.setattr(hud_mod.subprocess, "Popen", lambda args, **kw: llamadas.append(args))
+    monkeypatch.setattr(hud_mod.webbrowser, "open", lambda url: pytest.fail("no debería caer a pestaña"))
+
+    hud_mod._abrir_ventana_app("http://127.0.0.1:8765/")
+
+    assert llamadas == [["/usr/bin/chrome", "--app=http://127.0.0.1:8765/", "--window-size=480,480"]]
+
+
+def test_abrir_ventana_app_cae_a_pestana_sin_navegador(monkeypatch):
+    from jarvis import hud as hud_mod
+
+    abiertas = []
+    monkeypatch.setattr(hud_mod, "_navegador_con_modo_app", lambda: None)
+    monkeypatch.setattr(hud_mod.webbrowser, "open", lambda url: abiertas.append(url))
+
+    hud_mod._abrir_ventana_app("http://127.0.0.1:8765/")
+
+    assert abiertas == ["http://127.0.0.1:8765/"]
+
+
 def test_modo_texto_con_hud(monkeypatch, tmp_path):
     estados = []
 
