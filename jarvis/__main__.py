@@ -38,12 +38,21 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     config = Config.desde_entorno()
+    clave_persistente = "ANTHROPIC_API_KEY" in os.environ  # ya venía de .env/entorno real
     try:
         cerebro = _crear_cerebro(config)
     except RuntimeError as error:
         print(error, file=sys.stderr)
         return 1
 
+    try:
+        return _ejecutar(args, config, cerebro)
+    finally:
+        if not clave_persistente:
+            os.environ.pop("ANTHROPIC_API_KEY", None)  # la del menú no sobrevive a esta ejecución
+
+
+def _ejecutar(args, config: Config, cerebro) -> int:
     modo_voz = not args.texto
     usar_hud = (modo_voz and not args.sin_hud) or (not modo_voz and args.hud)
 
@@ -158,8 +167,9 @@ def _crear_cerebro(config: Config):
 def _menu_activacion() -> str:
     """Pregunta cómo conectar con Claude cuando no hay clave ni suscripción listas.
 
-    Solo guía: escribe la clave en .env si el usuario la da, pero no instala
-    paquetes ni ejecuta `claude` por él.
+    Solo guía, y no persiste nada en disco: la clave que pegues vive solo en
+    esta ejecución (os.environ) y se pierde al cerrar Jarvis. Si no quieres
+    repetirlo cada vez, pon la clave vos mismo en .env.
     """
     print("No encuentro cómo conectar con Claude. ¿Cómo quieres activarlo?")
     print("  1) Ya tengo (o voy a pegar ahora) una clave de API")
@@ -173,9 +183,8 @@ def _menu_activacion() -> str:
         clave = getpass.getpass("Pega tu ANTHROPIC_API_KEY (de https://console.anthropic.com): ").strip()
         if not clave:
             raise RuntimeError("No diste ninguna clave. Copia .env.example como .env y pon tu ANTHROPIC_API_KEY.")
-        _guardar_en_env("ANTHROPIC_API_KEY", clave)
         os.environ["ANTHROPIC_API_KEY"] = clave
-        print("(clave guardada en .env)")
+        print("(clave activa solo para esta sesión; se pierde al cerrar Jarvis)")
         return "api"
 
     if eleccion == "2":
@@ -192,24 +201,6 @@ def _menu_activacion() -> str:
         "  - Clave de API: copia .env.example como .env y pon tu ANTHROPIC_API_KEY.\n"
         "  - Suscripción Pro/Max: ejecuta `claude` e inicia sesión con /login."
     )
-
-
-def _guardar_en_env(clave: str, valor: str, ruta: Path = Path(".env")) -> None:
-    """Escribe o reemplaza CLAVE=valor en .env, conservando el resto del archivo."""
-    lineas = ruta.read_text(encoding="utf-8").splitlines() if ruta.is_file() else []
-    nueva = f"{clave}={valor}"
-    for i, linea in enumerate(lineas):
-        if linea.strip().startswith(f"{clave}="):
-            lineas[i] = nueva
-            break
-    else:
-        lineas.append(nueva)
-    contenido = "\n".join(lineas) + "\n"
-    if ruta.is_file():
-        os.chmod(ruta, 0o600)  # ya existía con permisos más abiertos: cerrarlos antes de escribir
-    descriptor = os.open(str(ruta), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(descriptor, "w", encoding="utf-8") as archivo:
-        archivo.write(contenido)
 
 
 def _hay_sesion_claude() -> bool:

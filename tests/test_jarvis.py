@@ -1,8 +1,6 @@
 """Pruebas sin red: se sustituye el cliente de Claude por uno falso."""
 
 import os
-import stat
-import sys
 from types import SimpleNamespace as NS
 
 import pytest
@@ -304,7 +302,7 @@ def test_auto_sin_clave_ni_sesion_pide_menu(monkeypatch, tmp_path):
         _crear_cerebro(Config(carpeta_datos=tmp_path))
 
 
-def test_menu_activacion_opcion_api_guarda_env(monkeypatch, tmp_path):
+def test_menu_activacion_opcion_api_no_persiste_en_disco(monkeypatch, tmp_path):
     from jarvis.__main__ import _menu_activacion
 
     monkeypatch.chdir(tmp_path)
@@ -314,7 +312,7 @@ def test_menu_activacion_opcion_api_guarda_env(monkeypatch, tmp_path):
 
     assert _menu_activacion() == "api"
     assert os.environ["ANTHROPIC_API_KEY"] == "sk-ant-prueba"
-    assert "ANTHROPIC_API_KEY=sk-ant-prueba" in (tmp_path / ".env").read_text()
+    assert not (tmp_path / ".env").exists()  # solo en memoria, nada escrito a disco
 
 
 def test_menu_activacion_opcion_api_sin_clave_falla(monkeypatch, tmp_path):
@@ -368,29 +366,30 @@ def test_hay_sesion_claude_detecta_archivo_de_credenciales(monkeypatch, tmp_path
     assert _hay_sesion_claude() is True
 
 
-def test_guardar_en_env_reemplaza_sin_duplicar(tmp_path):
-    from jarvis.__main__ import _guardar_en_env
+def test_clave_del_menu_no_sobrevive_al_cierre(monkeypatch, tmp_path):
+    monkeypatch.setenv("JARVIS_CARPETA_DATOS", str(tmp_path))
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
 
-    ruta = tmp_path / ".env"
-    ruta.write_text("ANTHROPIC_API_KEY=vieja\nJARVIS_IDIOMA=es\n", encoding="utf-8")
+    def crear_cerebro_falso(_config):
+        os.environ["ANTHROPIC_API_KEY"] = "del-menu"  # lo que haría _menu_activacion
+        return NS(responder=lambda t: "ok")
 
-    _guardar_en_env("ANTHROPIC_API_KEY", "nueva", ruta)
+    monkeypatch.setattr("jarvis.__main__._crear_cerebro", crear_cerebro_falso)
+    monkeypatch.setattr("builtins.input", lambda _="": "salir")
 
-    lineas = ruta.read_text(encoding="utf-8").splitlines()
-    assert lineas == ["ANTHROPIC_API_KEY=nueva", "JARVIS_IDIOMA=es"]
+    assert main(["--texto"]) == 0
+    assert "ANTHROPIC_API_KEY" not in os.environ
 
 
-@pytest.mark.skipif(sys.platform == "win32", reason="permisos unix, no aplica en Windows")
-def test_guardar_en_env_restringe_permisos(tmp_path):
-    from jarvis.__main__ import _guardar_en_env
+def test_clave_preexistente_sigue_tras_el_cierre(monkeypatch, tmp_path):
+    monkeypatch.setenv("JARVIS_CARPETA_DATOS", str(tmp_path))
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "real")
 
-    ruta = tmp_path / ".env"
-    ruta.write_text("ANTHROPIC_API_KEY=vieja\n", encoding="utf-8")
-    ruta.chmod(0o644)  # simula un .env con permisos abiertos
+    monkeypatch.setattr("jarvis.__main__._crear_cerebro", lambda _config: NS(responder=lambda t: "ok"))
+    monkeypatch.setattr("builtins.input", lambda _="": "salir")
 
-    _guardar_en_env("ANTHROPIC_API_KEY", "nueva", ruta)
-
-    assert stat.S_IMODE(ruta.stat().st_mode) == 0o600
+    assert main(["--texto"]) == 0
+    assert os.environ["ANTHROPIC_API_KEY"] == "real"
 
 
 def _detectar(detector, volumenes):
