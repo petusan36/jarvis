@@ -54,6 +54,8 @@ class Herramientas:
             registrar_sistema(self)
         from .musica import registrar_musica
         registrar_musica(self, youtube_api_key)
+        from .web import registrar_web
+        registrar_web(self)
 
     def nuevo_turno(self) -> None:
         """Avisa de que ha llegado un mensaje nuevo del usuario."""

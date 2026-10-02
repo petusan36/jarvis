@@ -282,6 +282,12 @@ cuota) en <https://console.cloud.google.com/apis/library/youtube.googleapis.com>
 y ponla en `YOUTUBE_API_KEY`. Sin ella, igual funciona: abre los resultados y
 elegís vos.
 
+## Navegar por internet
+
+Para lo que no sea específicamente música en YouTube: "abrí Spotify" o
+"buscá las noticias de hoy" abren el navegador — una URL directa si la das,
+o una búsqueda en Google si no.
+
 ## Configuración
 
 Todo se ajusta en el archivo `.env` (mira `.env.example`):
@@ -317,6 +323,7 @@ jarvis/
 ├── herramientas.py  herramientas que Claude puede usar
 ├── sistema.py       herramientas de carpetas, aplicaciones y PDFs (macOS)
 ├── musica.py        buscar y reproducir música en YouTube
+├── web.py           abrir páginas web / buscar en Google
 ├── config.py        configuración desde .env
 ├── escritorio.py    ícono de escritorio (--instalar-app)
 ├── hud/             animación estilo Jarvis (servidor local + hud.html)
