@@ -1,6 +1,8 @@
 """Pruebas sin red: se sustituye el cliente de Claude por uno falso."""
 
 import os
+import stat
+import sys
 from types import SimpleNamespace as NS
 
 import pytest
@@ -376,6 +378,19 @@ def test_guardar_en_env_reemplaza_sin_duplicar(tmp_path):
 
     lineas = ruta.read_text(encoding="utf-8").splitlines()
     assert lineas == ["ANTHROPIC_API_KEY=nueva", "JARVIS_IDIOMA=es"]
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="permisos unix, no aplica en Windows")
+def test_guardar_en_env_restringe_permisos(tmp_path):
+    from jarvis.__main__ import _guardar_en_env
+
+    ruta = tmp_path / ".env"
+    ruta.write_text("ANTHROPIC_API_KEY=vieja\n", encoding="utf-8")
+    ruta.chmod(0o644)  # simula un .env con permisos abiertos
+
+    _guardar_en_env("ANTHROPIC_API_KEY", "nueva", ruta)
+
+    assert stat.S_IMODE(ruta.stat().st_mode) == 0o600
 
 
 def _detectar(detector, volumenes):
