@@ -208,6 +208,37 @@ No necesita instalar nada: Jarvis sirve la página en `http://127.0.0.1:8765`
 (cámbialo con `JARVIS_PUERTO_HUD`). Pulsa F11 en el navegador para verla a
 pantalla completa.
 
+## App de escritorio
+
+```bash
+python -m jarvis --instalar-app
+```
+
+Crea un ícono de doble clic que abre Jarvis en modo completo (voz + HUD), sin
+ventana de terminal: la salida queda en `~/.jarvis/jarvis.log` en vez de en
+pantalla.
+
+| Sistema | Dónde queda |
+|---|---|
+| macOS | `~/Applications/Jarvis.app` (Finder, Launchpad, Spotlight) |
+| Windows | Menú Inicio → Jarvis |
+| Linux | menú de aplicaciones del escritorio (`~/.local/share/applications`) |
+
+Importante:
+
+- **La primera vez, usa una terminal.** Sin ventana, el menú de activación
+  (clave de API o suscripción) no puede mostrarse. Corre `python -m jarvis`
+  desde la terminal una vez, configurá cómo conectar con Claude, y de ahí en
+  más el ícono ya funciona solo.
+- **macOS puede avisar "desarrollador no identificado"** la primera vez que
+  abras el ícono (no está firmado ni notarizado): clic derecho → Abrir, o
+  `xattr -d com.apple.quarantine ~/Applications/Jarvis.app`.
+- No hay ícono con arte personalizado ni desinstalador todavía — borrar el
+  ícono a mano (`rm -rf ~/Applications/Jarvis.app` en macOS, el `.bat` o el
+  `.desktop` en Windows/Linux) alcanza para quitarlo.
+- Este paso prepara el terreno para que la animación HUD, más adelante, flote
+  directamente en el escritorio en vez de abrirse en una pestaña del navegador.
+
 ## Carpetas y aplicaciones (macOS)
 
 Jarvis puede manejar tu Mac por voz o texto:
@@ -261,6 +292,7 @@ jarvis/
 ├── herramientas.py  herramientas que Claude puede usar
 ├── sistema.py       herramientas de carpetas y aplicaciones (macOS)
 ├── config.py        configuración desde .env
+├── escritorio.py    ícono de escritorio (--instalar-app)
 ├── hud/             animación estilo Jarvis (servidor local + hud.html)
 └── voz/
     ├── oido.py      micrófono + Whisper (faster-whisper)

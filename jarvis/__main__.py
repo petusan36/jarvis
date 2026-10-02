@@ -1,7 +1,8 @@
-"""Punto de entrada: python -m jarvis [--texto] [--sin-hud] [--silencio] [--pulsar] [--hud].
+"""Punto de entrada: python -m jarvis [--texto] [--sin-hud] [--silencio] [--pulsar] [--hud] [--instalar-app].
 
 Por defecto arranca el modo completo: te escucha, te responde hablando y abre
 la animación HUD. Usa --texto para el modo clásico de escribir y leer.
+--instalar-app crea un ícono de escritorio y termina sin arrancar Jarvis.
 """
 
 from __future__ import annotations
@@ -35,7 +36,14 @@ def main(argv: list[str] | None = None) -> int:
                         help="En modo voz, pulsar Enter para hablar en lugar de escuchar siempre.")
     parser.add_argument("--hud", action="store_true",
                         help="Con --texto, abre igual la animación HUD aunque no haya voz.")
+    parser.add_argument("--instalar-app", action="store_true",
+                        help="Crea un ícono de escritorio para esta instalación y termina.")
     args = parser.parse_args(argv)
+
+    if args.instalar_app:
+        from .escritorio import instalar_app_escritorio
+        print(f"Listo: {instalar_app_escritorio()}")
+        return 0
 
     config = Config.desde_entorno()
     clave_persistente = "ANTHROPIC_API_KEY" in os.environ  # ya venía de .env/entorno real
