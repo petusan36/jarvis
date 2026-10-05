@@ -1,13 +1,26 @@
-"""El cerebro de Jarvis: conversa con Claude y ejecuta las herramientas que pida."""
+"""El cerebro de Jarvis: conversa con un proveedor de IA (puerto
+``ProveedorIA``) y ejecuta las herramientas que pida.
+
+No conoce anthropic, openai ni ollama: solo el puerto, inyectado por quien
+construye el ``Cerebro`` (ver ``jarvis.proveedores`` y ``jarvis.__main__``).
+"""
 
 from __future__ import annotations
 
 from typing import Any
 
-import anthropic
-
 from .config import Config
 from .herramientas import Herramientas
+from .proveedores import (
+    AdaptadorAnthropic,
+    BloqueTexto,
+    BloqueUsoHerramienta,
+    ProveedorIA,
+    ResultadoHerramienta,
+    TurnoAsistente,
+    TurnoResultadoHerramienta,
+    TurnoUsuario,
+)
 
 INSTRUCCIONES = """Eres J.A.R.V.I.S., el asistente personal de {nombre}, inspirado en el \
 mayordomo digital de Tony Stark: educado, eficiente y con un toque de humor británico seco.
@@ -27,54 +40,48 @@ MAX_VUELTAS = 10
 
 
 class Cerebro:
-    def __init__(self, config: Config, herramientas: Herramientas, cliente: Any | None = None):
+    def __init__(self, config: Config, herramientas: Herramientas, proveedor: ProveedorIA | None = None):
         self.config = config
         self.herramientas = herramientas
-        self.cliente = cliente or anthropic.Anthropic()
-        self.historial: list[dict[str, Any]] = []
+        # Por defecto, Anthropic (comportamiento histórico de Jarvis).
+        self.proveedor = proveedor or AdaptadorAnthropic()
+        self.historial: list[Any] = []
 
     def responder(self, texto_usuario: str) -> str:
         """Envía un mensaje del usuario y devuelve la respuesta final en texto."""
         self.herramientas.nuevo_turno()
-        self.historial.append({"role": "user", "content": texto_usuario})
+        self.historial.append(TurnoUsuario(texto=texto_usuario))
 
         for _ in range(MAX_VUELTAS):
-            respuesta = self.cliente.beta.messages.create(
-                model=self.config.modelo,
+            respuesta = self.proveedor.responder(
+                mensajes=self.historial,
+                sistema=INSTRUCCIONES.format(nombre=self.config.nombre_usuario),
+                herramientas=self.herramientas.definiciones(),
+                modelo=self.config.modelo,
                 max_tokens=self.config.max_tokens,
-                system=INSTRUCCIONES.format(nombre=self.config.nombre_usuario),
-                tools=self.herramientas.definiciones(),
-                messages=self.historial,
-                output_config={"effort": self.config.esfuerzo},
-                # Si el modelo rechaza la petición, la API reintenta con otro modelo.
-                betas=["server-side-fallback-2026-07-01"],
-                fallbacks="default",
+                esfuerzo=self.config.esfuerzo,
             )
-            # Se guarda el contenido completo (incluidos bloques de razonamiento)
-            # para que la conversación siga siendo válida en la siguiente vuelta.
-            self.historial.append({"role": "assistant", "content": respuesta.content})
+            # Se guarda el contenido completo (incluido ``bruto``, con cualquier
+            # bloque de razonamiento) para que la conversación siga siendo
+            # válida en la siguiente vuelta.
+            self.historial.append(TurnoAsistente(contenido=respuesta.contenido, bruto=respuesta.bruto))
 
-            if respuesta.stop_reason == "refusal":
+            if respuesta.detenida_por == "rechazo":
                 return "Me temo que no puedo ayudarle con eso."
-            if respuesta.stop_reason != "tool_use":
-                texto = _texto(respuesta.content)
-                if respuesta.stop_reason == "max_tokens":
+            if respuesta.detenida_por != "herramienta":
+                texto = _texto(respuesta.contenido)
+                if respuesta.detenida_por == "longitud":
                     texto += " (respuesta cortada por longitud)"
                 return texto or "..."
 
             resultados = []
-            for bloque in respuesta.content:
-                if bloque.type != "tool_use":
+            for bloque in respuesta.contenido:
+                if not isinstance(bloque, BloqueUsoHerramienta):
                     continue
-                salida, es_error = self.herramientas.ejecutar(bloque.name, bloque.input)
-                resultados.append({
-                    "type": "tool_result",
-                    "tool_use_id": bloque.id,
-                    "content": salida,
-                    "is_error": es_error,
-                })
-            # Todos los resultados van juntos en un único mensaje del usuario.
-            self.historial.append({"role": "user", "content": resultados})
+                salida, es_error = self.herramientas.ejecutar(bloque.nombre, bloque.entrada)
+                resultados.append(ResultadoHerramienta(id_uso=bloque.id, contenido=salida, es_error=es_error))
+            # Todos los resultados van juntos en un único turno.
+            self.historial.append(TurnoResultadoHerramienta(resultados=resultados))
 
         return "He dado demasiadas vueltas a esto. ¿Podría reformular la petición?"
 
@@ -84,4 +91,4 @@ class Cerebro:
 
 
 def _texto(contenido: list[Any]) -> str:
-    return "".join(b.text for b in contenido if b.type == "text").strip()
+    return "".join(b.texto for b in contenido if isinstance(b, BloqueTexto)).strip()
