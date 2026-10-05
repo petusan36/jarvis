@@ -9,6 +9,7 @@ from jarvis.__main__ import main
 from jarvis.cerebro import Cerebro
 from jarvis.config import Config
 from jarvis.herramientas import Herramientas, evaluar_expresion
+from jarvis.proveedores import AdaptadorAnthropic
 
 
 class ClienteFalso:
@@ -73,24 +74,25 @@ def test_cerebro_usa_herramienta(herramientas):
         NS(stop_reason="tool_use", content=[uso("calcular", {"expresion": "6*7"})]),
         NS(stop_reason="end_turn", content=[texto("Son 42, señor.")]),
     ])
-    cerebro = Cerebro(Config(), herramientas, cliente)
+    cerebro = Cerebro(Config(), herramientas, AdaptadorAnthropic(cliente))
 
     assert cerebro.responder("¿Cuánto es 6 por 7?") == "Son 42, señor."
-    resultado = cerebro.historial[2]["content"][0]
-    assert resultado["type"] == "tool_result" and resultado["content"] == "42"
+    resultado = cerebro.historial[2].resultados[0]
+    assert resultado.contenido == "42" and not resultado.es_error
     assert cliente.peticiones[0]["model"] == "claude-opus-5-5"
 
 
 def test_cerebro_rechazo(herramientas):
     cliente = ClienteFalso([NS(stop_reason="refusal", content=[])])
-    assert "no puedo" in Cerebro(Config(), herramientas, cliente).responder("algo").lower()
+    cerebro = Cerebro(Config(), herramientas, AdaptadorAnthropic(cliente))
+    assert "no puedo" in cerebro.responder("algo").lower()
 
 
 def test_modo_texto_de_principio_a_fin(monkeypatch, tmp_path, capsys):
     cliente = ClienteFalso([NS(stop_reason="end_turn", content=[texto("Todo en orden, señor.")])])
     monkeypatch.setenv("JARVIS_CARPETA_DATOS", str(tmp_path))
     monkeypatch.setenv("ANTHROPIC_API_KEY", "prueba")
-    monkeypatch.setattr("jarvis.cerebro.anthropic.Anthropic", lambda: cliente)
+    monkeypatch.setattr("jarvis.proveedores.anthropic_adaptador.anthropic.Anthropic", lambda: cliente)
     entradas = iter(["hola", "salir"])
     monkeypatch.setattr("builtins.input", lambda _="": next(entradas))
 
@@ -107,7 +109,7 @@ def test_jarvis_se_cierra_solo_por_decision_de_claude(monkeypatch, tmp_path, cap
     ])
     monkeypatch.setenv("JARVIS_CARPETA_DATOS", str(tmp_path))
     monkeypatch.setenv("ANTHROPIC_API_KEY", "prueba")
-    monkeypatch.setattr("jarvis.cerebro.anthropic.Anthropic", lambda: cliente)
+    monkeypatch.setattr("jarvis.proveedores.anthropic_adaptador.anthropic.Anthropic", lambda: cliente)
     entradas = iter(["ya terminamos por hoy, cerrate"])  # nunca dice "salir" literal
     monkeypatch.setattr("builtins.input", lambda _="": next(entradas))
 
@@ -192,7 +194,7 @@ def test_modo_texto_con_hud(monkeypatch, tmp_path):
     cliente = ClienteFalso([NS(stop_reason="end_turn", content=[texto("Todo en orden, señor.")])])
     monkeypatch.setenv("JARVIS_CARPETA_DATOS", str(tmp_path))
     monkeypatch.setenv("ANTHROPIC_API_KEY", "prueba")
-    monkeypatch.setattr("jarvis.cerebro.anthropic.Anthropic", lambda: cliente)
+    monkeypatch.setattr("jarvis.proveedores.anthropic_adaptador.anthropic.Anthropic", lambda: cliente)
     monkeypatch.setattr("jarvis.__main__.Hud", HudFalso)
     entradas = iter(["hola", "salir"])
     monkeypatch.setattr("builtins.input", lambda _="": next(entradas))
@@ -240,7 +242,7 @@ def test_modo_completo_por_defecto_usa_voz_y_hud(monkeypatch, tmp_path):
     cliente = ClienteFalso([NS(stop_reason="end_turn", content=[texto("Todo en orden, señor.")])])
     monkeypatch.setenv("JARVIS_CARPETA_DATOS", str(tmp_path))
     monkeypatch.setenv("ANTHROPIC_API_KEY", "prueba")
-    monkeypatch.setattr("jarvis.cerebro.anthropic.Anthropic", lambda: cliente)
+    monkeypatch.setattr("jarvis.proveedores.anthropic_adaptador.anthropic.Anthropic", lambda: cliente)
     monkeypatch.setattr("jarvis.__main__.Hud", _HudFalso)
     monkeypatch.setattr("jarvis.voz.oido.Oido", _OidoFalso)
     monkeypatch.setattr("jarvis.voz.habla.crear_habla", lambda _config: _HablaFalsa())
@@ -253,7 +255,7 @@ def test_usa_ventana_nativa_si_esta_disponible_en_macos(monkeypatch, tmp_path):
     cliente = ClienteFalso([NS(stop_reason="end_turn", content=[texto("Todo en orden, señor.")])])
     monkeypatch.setenv("JARVIS_CARPETA_DATOS", str(tmp_path))
     monkeypatch.setenv("ANTHROPIC_API_KEY", "prueba")
-    monkeypatch.setattr("jarvis.cerebro.anthropic.Anthropic", lambda: cliente)
+    monkeypatch.setattr("jarvis.proveedores.anthropic_adaptador.anthropic.Anthropic", lambda: cliente)
     monkeypatch.setattr("sys.platform", "darwin")
     monkeypatch.setattr("jarvis.hud.ventana_macos.disponible", lambda: True)
     monkeypatch.setattr("jarvis.__main__.Hud", _HudFalso)
@@ -279,7 +281,7 @@ def test_sin_hud_mantiene_modo_voz(monkeypatch, tmp_path):
     cliente = ClienteFalso([NS(stop_reason="end_turn", content=[texto("Todo en orden, señor.")])])
     monkeypatch.setenv("JARVIS_CARPETA_DATOS", str(tmp_path))
     monkeypatch.setenv("ANTHROPIC_API_KEY", "prueba")
-    monkeypatch.setattr("jarvis.cerebro.anthropic.Anthropic", lambda: cliente)
+    monkeypatch.setattr("jarvis.proveedores.anthropic_adaptador.anthropic.Anthropic", lambda: cliente)
     monkeypatch.setattr("jarvis.__main__.Hud", _HudFalso)
     monkeypatch.setattr("jarvis.voz.oido.Oido", _OidoFalso)
     monkeypatch.setattr("jarvis.voz.habla.crear_habla", lambda _config: _HablaFalsa())
@@ -377,56 +379,121 @@ def test_auto_sin_clave_ni_sesion_pide_menu(monkeypatch, tmp_path):
         _crear_cerebro(Config(carpeta_datos=tmp_path))
 
 
-def test_menu_activacion_opcion_api_no_persiste_en_disco(monkeypatch, tmp_path):
-    from jarvis.__main__ import _menu_activacion
+def test_menu_conexion_opcion_nube_anthropic_persiste_en_disco(monkeypatch, tmp_path):
+    from jarvis.__main__ import _menu_conexion_ia
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    monkeypatch.setattr("builtins.input", lambda _: "1")
+    entradas = iter(["2", "1"])  # 2) proveedor en la nube -> 1) Anthropic
+    monkeypatch.setattr("builtins.input", lambda _="": next(entradas))
     monkeypatch.setattr("getpass.getpass", lambda _: "sk-ant-prueba")
 
-    assert _menu_activacion() == "api"
+    assert _menu_conexion_ia() == "api"
     assert os.environ["ANTHROPIC_API_KEY"] == "sk-ant-prueba"
-    assert not (tmp_path / ".env").exists()  # solo en memoria, nada escrito a disco
+    assert os.environ["JARVIS_PROVEEDOR"] == "anthropic"
+
+    env = (tmp_path / ".env").read_text()
+    assert "ANTHROPIC_API_KEY=sk-ant-prueba" in env
+    assert "JARVIS_PROVEEDOR=anthropic" in env
+    permisos = (tmp_path / ".env").stat().st_mode & 0o777
+    assert permisos == 0o600
 
 
-def test_menu_activacion_opcion_api_sin_clave_falla(monkeypatch, tmp_path):
-    from jarvis.__main__ import _menu_activacion
+def test_menu_conexion_opcion_nube_openai_persiste_en_disco(monkeypatch, tmp_path):
+    from jarvis.__main__ import _menu_conexion_ia
 
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr("builtins.input", lambda _: "1")
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    entradas = iter(["2", "2"])  # 2) proveedor en la nube -> 2) OpenAI
+    monkeypatch.setattr("builtins.input", lambda _="": next(entradas))
+    monkeypatch.setattr("getpass.getpass", lambda _: "sk-prueba-openai")
+
+    assert _menu_conexion_ia() == "api"
+    assert os.environ["OPENAI_API_KEY"] == "sk-prueba-openai"
+    assert os.environ["JARVIS_PROVEEDOR"] == "openai"
+    assert "OPENAI_API_KEY=sk-prueba-openai" in (tmp_path / ".env").read_text()
+
+
+def test_menu_conexion_opcion_nube_sin_clave_falla(monkeypatch, tmp_path):
+    from jarvis.__main__ import _menu_conexion_ia
+
+    monkeypatch.chdir(tmp_path)
+    entradas = iter(["2", "1"])
+    monkeypatch.setattr("builtins.input", lambda _="": next(entradas))
     monkeypatch.setattr("getpass.getpass", lambda _: "")
 
     with pytest.raises(RuntimeError, match="ANTHROPIC_API_KEY"):
-        _menu_activacion()
+        _menu_conexion_ia()
 
 
-def test_menu_activacion_opcion_suscripcion_sin_sesion(monkeypatch):
-    from jarvis.__main__ import _menu_activacion
+def test_menu_conexion_opcion_local_lista_y_persiste_modelo(monkeypatch, tmp_path):
+    from jarvis.__main__ import _menu_conexion_ia
 
-    monkeypatch.setattr("builtins.input", lambda _: "2")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("jarvis.__main__.listar_modelos_ollama", lambda: ["qwen3:8b", "qwen3-vl:4b"])
+    entradas = iter(["1", "1"])  # 1) modelo local -> 1) qwen3:8b
+    monkeypatch.setattr("builtins.input", lambda _="": next(entradas))
+
+    assert _menu_conexion_ia() == "api"
+    assert os.environ["JARVIS_PROVEEDOR"] == "ollama"
+    assert os.environ["JARVIS_MODELO"] == "qwen3:8b"
+    env = (tmp_path / ".env").read_text()
+    assert "JARVIS_PROVEEDOR=ollama" in env
+    assert "JARVIS_MODELO=qwen3:8b" in env
+
+
+def test_menu_conexion_opcion_local_sin_ollama_corriendo_no_crashea(monkeypatch, tmp_path):
+    from jarvis.__main__ import _menu_conexion_ia
+
+    monkeypatch.chdir(tmp_path)
+
+    def _listar_falla():
+        raise OSError("conexión rechazada")
+
+    monkeypatch.setattr("jarvis.__main__.listar_modelos_ollama", _listar_falla)
+    monkeypatch.setattr("builtins.input", lambda _="": "1")
+
+    with pytest.raises(RuntimeError, match="Ollama"):
+        _menu_conexion_ia()
+
+
+def test_menu_conexion_opcion_local_sin_modelos_instalados(monkeypatch, tmp_path):
+    from jarvis.__main__ import _menu_conexion_ia
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("jarvis.__main__.listar_modelos_ollama", lambda: [])
+    monkeypatch.setattr("builtins.input", lambda _="": "1")
+
+    with pytest.raises(RuntimeError, match="modelos instalados"):
+        _menu_conexion_ia()
+
+
+def test_menu_conexion_opcion_suscripcion_sin_sesion(monkeypatch):
+    from jarvis.__main__ import _menu_conexion_ia
+
+    monkeypatch.setattr("builtins.input", lambda _="": "3")
     monkeypatch.setattr("jarvis.__main__._hay_sesion_claude", lambda: False)
 
     with pytest.raises(RuntimeError, match="sesión"):
-        _menu_activacion()
+        _menu_conexion_ia()
 
 
-def test_menu_activacion_opcion_suscripcion_con_sesion(monkeypatch):
-    from jarvis.__main__ import _menu_activacion
+def test_menu_conexion_opcion_suscripcion_con_sesion(monkeypatch):
+    from jarvis.__main__ import _menu_conexion_ia
 
-    monkeypatch.setattr("builtins.input", lambda _: "2")
+    monkeypatch.setattr("builtins.input", lambda _="": "3")
     monkeypatch.setattr("jarvis.__main__._hay_sesion_claude", lambda: True)
 
-    assert _menu_activacion() == "suscripcion"
+    assert _menu_conexion_ia() == "suscripcion"
 
 
-def test_menu_activacion_opcion_invalida_falla(monkeypatch):
-    from jarvis.__main__ import _menu_activacion
+def test_menu_conexion_opcion_invalida_falla(monkeypatch):
+    from jarvis.__main__ import _menu_conexion_ia
 
-    monkeypatch.setattr("builtins.input", lambda _: "3")
+    monkeypatch.setattr("builtins.input", lambda _="": "9")
 
     with pytest.raises(RuntimeError, match="No encuentro"):
-        _menu_activacion()
+        _menu_conexion_ia()
 
 
 def test_instancia_unica_primera_vez_toma_el_lock(tmp_path):
@@ -478,26 +545,34 @@ def test_hay_sesion_claude_detecta_archivo_de_credenciales(monkeypatch, tmp_path
     assert _hay_sesion_claude() is True
 
 
-def test_clave_del_menu_no_sobrevive_al_cierre(monkeypatch, tmp_path):
+def test_clave_del_menu_sigue_disponible_tras_el_cierre(monkeypatch, tmp_path):
+    """A diferencia del comportamiento anterior (clave solo en memoria), el
+    nuevo flujo persiste a propósito la elección del menú: no debe borrarse
+    al cerrar Jarvis."""
     monkeypatch.setenv("JARVIS_CARPETA_DATOS", str(tmp_path))
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    config_falsa = Config(carpeta_datos=tmp_path)
 
-    def crear_cerebro_falso(_config):
-        os.environ["ANTHROPIC_API_KEY"] = "del-menu"  # lo que haría _menu_activacion
-        return NS(responder=lambda t: "ok")
+    def crear_cerebro_falso(_config, forzar_menu=False):
+        os.environ["ANTHROPIC_API_KEY"] = "del-menu"  # lo que haría _configurar_proveedor_nube
+        return NS(config=config_falsa, responder=lambda t: "ok")
 
     monkeypatch.setattr("jarvis.__main__._crear_cerebro", crear_cerebro_falso)
     monkeypatch.setattr("builtins.input", lambda _="": "salir")
 
     assert main(["--texto"]) == 0
-    assert "ANTHROPIC_API_KEY" not in os.environ
+    assert os.environ["ANTHROPIC_API_KEY"] == "del-menu"
 
 
 def test_clave_preexistente_sigue_tras_el_cierre(monkeypatch, tmp_path):
     monkeypatch.setenv("JARVIS_CARPETA_DATOS", str(tmp_path))
     monkeypatch.setenv("ANTHROPIC_API_KEY", "real")
+    config_falsa = Config(carpeta_datos=tmp_path)
 
-    monkeypatch.setattr("jarvis.__main__._crear_cerebro", lambda _config: NS(responder=lambda t: "ok"))
+    monkeypatch.setattr(
+        "jarvis.__main__._crear_cerebro",
+        lambda _config, forzar_menu=False: NS(config=config_falsa, responder=lambda t: "ok"),
+    )
     monkeypatch.setattr("builtins.input", lambda _="": "salir")
 
     assert main(["--texto"]) == 0
