@@ -26,6 +26,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]
+openai = ["openai>=1.0"]  # solo si JARVIS_PROVEEDOR=openai; Anthropic y Ollama no la necesitan
 
 [project.scripts]
 jarvis = "jarvis.__main__:main"
