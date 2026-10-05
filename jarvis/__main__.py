@@ -12,6 +12,7 @@ import getpass
 import os
 import subprocess
 import sys
+import threading
 from pathlib import Path
 
 import anthropic
@@ -148,7 +149,7 @@ def _bucle_conversacion(args, config: Config, cerebro, hud: HudNulo) -> int:
             if type(error).__module__.split(".")[0] != "claude_agent_sdk":
                 raise
             respuesta = f"No consigo hablar con Claude Code: {error}"
-        _decir(respuesta, habla, hud)
+        _decir(respuesta, habla, hud, oido)
         if cerebro.herramientas.salir_pedido:
             break
 
@@ -159,13 +160,25 @@ def _bucle_conversacion(args, config: Config, cerebro, hud: HudNulo) -> int:
     return 0
 
 
-def _decir(texto: str, habla, hud: HudNulo) -> None:
-    """Muestra la respuesta, anima el HUD mientras se pronuncia y lo deja en reposo."""
+PALABRA_INTERRUPCION = "jarvis"
+
+
+def _decir(texto: str, habla, hud: HudNulo, oido=None) -> None:
+    """Muestra la respuesta, anima el HUD mientras se pronuncia y lo deja en
+    reposo. Si hay oído y el motor de voz se puede cortar a mitad de frase,
+    escucha en paralelo por si dicen "Jarvis" para interrumpirlo."""
     print(f"JARVIS: {texto}")
     hud.estado("hablando", texto)
-    if habla:
+    if not habla:
+        return
+    if oido and habla.interrumpible:
+        detener_vigia = threading.Event()
+        oido.vigilar_interrupcion(PALABRA_INTERRUPCION, detener_vigia, habla.detener)
         habla.decir(texto)
-        hud.estado("reposo")
+        detener_vigia.set()
+    else:
+        habla.decir(texto)
+    hud.estado("reposo")
 
 
 def _crear_cerebro(config: Config):

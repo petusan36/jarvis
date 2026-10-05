@@ -63,6 +63,16 @@ class Habla:
     def nombre(self) -> str:
         return self.motores[0].nombre
 
+    @property
+    def interrumpible(self) -> bool:
+        """¿El motor activo se puede cortar a mitad de frase (detener())?"""
+        return bool(self.motores) and hasattr(self.motores[0], "detener")
+
+    def detener(self) -> None:
+        """Corta la reproducción en seco. No hace nada si el motor no lo soporta."""
+        if self.interrumpible:
+            self.motores[0].detener()
+
     def decir(self, texto: str) -> None:
         texto = _limpiar(texto)
         if not texto:
@@ -168,6 +178,9 @@ class MotorElevenLabs:
         self.sd.play(muestras, self.frecuencia, latency=LATENCIA_SALIDA)
         self.sd.wait()
 
+    def detener(self) -> None:
+        self.sd.stop()
+
 
 class MotorKokoro:
     """Kokoro-82M: voz neuronal local, gratuita, mejor calidad que Piper (Apache-2.0)."""
@@ -194,6 +207,9 @@ class MotorKokoro:
         audio = _quitar_clics(self.np.concatenate(trozos), self.np, self.frecuencia)
         self.sd.play(audio, self.frecuencia, latency=LATENCIA_SALIDA)
         self.sd.wait()
+
+    def detener(self) -> None:
+        self.sd.stop()
 
 
 def _quitar_clics(audio, np, frecuencia: int, umbral: float = 0.3, ventana_ms: float = 6.0):
@@ -232,6 +248,9 @@ class MotorPiper:
             return
         self.sd.play(self.np.concatenate(trozos), self.voz.config.sample_rate, latency=LATENCIA_SALIDA)
         self.sd.wait()
+
+    def detener(self) -> None:
+        self.sd.stop()
 
 
 def _modelo_piper(carpeta: Path, voz: str) -> Path:

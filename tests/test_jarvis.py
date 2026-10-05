@@ -229,6 +229,7 @@ class _OidoFalso:
 
 class _HablaFalsa:
     nombre = "falsa"
+    interrumpible = False
 
     def decir(self, _texto):
         pass
@@ -546,6 +547,86 @@ def test_palabra_activacion():
     assert filtrar("Jarvis.", "jarvis") == "Jarvis."
 
 
+class _InputStreamFalso:
+    instancia = None
+
+    def __init__(self, **kwargs):
+        self.callback = kwargs["callback"]
+        _InputStreamFalso.instancia = self
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_a):
+        return False
+
+
+def _esperar_instancia_fake(timeout=2.0):
+    import time as _time
+    limite = _time.monotonic() + timeout
+    while _InputStreamFalso.instancia is None and _time.monotonic() < limite:
+        _time.sleep(0.01)
+    return _InputStreamFalso.instancia
+
+
+def test_vigilar_interrupcion_detecta_la_palabra(monkeypatch):
+    import threading as _threading
+
+    import numpy as np
+
+    from jarvis.voz.oido import Oido
+
+    _InputStreamFalso.instancia = None
+    monkeypatch.setattr("sounddevice.InputStream", _InputStreamFalso)
+
+    oido = Oido.__new__(Oido)
+    oido.sensibilidad = 3.0
+    oido._transcribir = lambda _audio: "jarvis, pará"
+
+    detener_vigia = _threading.Event()
+    llamado = []
+    interrumpido = oido.vigilar_interrupcion("jarvis", detener_vigia, lambda: llamado.append(True))
+
+    instancia = _esperar_instancia_fake()
+    assert instancia is not None, "el hilo nunca abrió el InputStream"
+
+    voz = np.full((480, 1), 0.2, dtype="float32")
+    silencio = np.zeros((480, 1), dtype="float32")
+    for _ in range(5):
+        instancia.callback(voz, 480, None, None)
+    for _ in range(30):
+        instancia.callback(silencio, 480, None, None)
+
+    assert interrumpido.wait(timeout=2)
+    assert llamado == [True]
+    detener_vigia.set()
+
+
+def test_vigilar_interrupcion_se_cancela_sin_disparar(monkeypatch):
+    import threading as _threading
+    import time as _time
+
+    from jarvis.voz.oido import Oido
+
+    _InputStreamFalso.instancia = None
+    monkeypatch.setattr("sounddevice.InputStream", _InputStreamFalso)
+
+    oido = Oido.__new__(Oido)
+    oido.sensibilidad = 3.0
+    oido._transcribir = lambda _audio: "buen día"
+
+    detener_vigia = _threading.Event()
+    llamado = []
+    interrumpido = oido.vigilar_interrupcion("jarvis", detener_vigia, lambda: llamado.append(True))
+
+    assert _esperar_instancia_fake() is not None
+    detener_vigia.set()
+    _time.sleep(0.4)  # darle tiempo al hilo a salir del loop (timeout interno de 0.2s)
+
+    assert not interrumpido.is_set()
+    assert llamado == []
+
+
 # --- Voz ---------------------------------------------------------------------
 
 from jarvis.voz import habla as habla_mod
@@ -575,6 +656,44 @@ def test_habla_sin_motores_no_rompe():
     habla = habla_mod.Habla([MotorFalso("piper", falla=True)])
     habla.decir("hola")
     habla.decir("hola otra vez")
+
+
+class MotorFalsoInterrumpible(MotorFalso):
+    def __init__(self, nombre):
+        super().__init__(nombre)
+        self.detenido = False
+
+    def detener(self):
+        self.detenido = True
+
+
+def test_habla_interrumpible_segun_motor():
+    assert habla_mod.Habla([MotorFalso("macos")]).interrumpible is False
+    assert habla_mod.Habla([MotorFalsoInterrumpible("kokoro")]).interrumpible is True
+
+
+def test_habla_detener_delega_al_motor_si_corresponde():
+    motor = MotorFalsoInterrumpible("kokoro")
+    habla_mod.Habla([motor]).detener()
+    assert motor.detenido is True
+
+
+def test_habla_detener_no_rompe_si_motor_no_soporta():
+    habla_mod.Habla([MotorFalso("macos")]).detener()  # no debe lanzar
+
+
+@pytest.mark.parametrize("Motor,atributos", [
+    (habla_mod.MotorKokoro, {}),
+    (habla_mod.MotorPiper, {}),
+    (habla_mod.MotorElevenLabs, {}),
+])
+def test_motores_sd_play_tienen_detener(Motor, atributos):
+    """Los tres motores que reproducen con sd.play() deben poder cortarse."""
+    motor = Motor.__new__(Motor)
+    llamadas = []
+    motor.sd = NS(stop=lambda: llamadas.append("detenido"))
+    motor.detener()
+    assert llamadas == ["detenido"]
 
 
 def test_elegir_voz_macos_prefiere_jorge_premium():

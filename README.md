@@ -110,11 +110,17 @@ Sin ningún flag arranca todo junto: te escucha, te responde hablando y abre en
 el navegador la animación estilo Jarvis ([ver más abajo](#animación-hud)).
 
 Jarvis te escucha siempre: habla cuando quieras y, en cuanto hagas una pausa de
-menos de un segundo, entiende que has terminado y responde. Mientras él habla
-el micrófono se apaga, así que no se escucha a sí mismo. Di **salir** o pulsa
-**Ctrl+C** para terminar. La primera vez se descarga el modelo de Whisper
-(`small`, unos 500 MB).
+menos de un segundo, entiende que has terminado y responde. Di **salir** o
+pulsa **Ctrl+C** para terminar. La primera vez se descarga el modelo de
+Whisper (`small`, unos 500 MB).
 
+- **Interrumpirlo mientras habla**: decí **"Jarvis"** y corta la respuesta al
+  instante (solo con los motores Kokoro, Piper o ElevenLabs — `say` de macOS
+  y pyttsx3 no se pueden cortar a mitad de frase). Sin cancelación de eco: con
+  parlantes el micrófono capta su propia voz mientras habla, así que en
+  teoría podría confundirse con algo que él mismo dijo, aunque es poco común
+  porque sus respuestas casi nunca se nombran a sí mismas. Con auriculares no
+  pasa.
 - **Sin la animación**: `python -m jarvis --sin-hud` — sigue escuchando y
   hablando, solo que no abre el navegador.
 - **Sin voz, solo hablando por texto**: `python -m jarvis --silencio` — te
