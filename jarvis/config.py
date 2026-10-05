@@ -19,10 +19,36 @@ def _cargar_dotenv(ruta: Path = Path(".env")) -> None:
         os.environ.setdefault(clave.strip(), valor.strip().strip('"').strip("'"))
 
 
+def guardar_en_env(clave: str, valor: str, ruta: Path = Path(".env")) -> None:
+    """Escribe o reemplaza CLAVE=valor en .env, conservando el resto del
+    archivo y con permisos 0600 (solo el usuario puede leerlo).
+
+    Se usa desde el menú de configuración de IA (``jarvis.__main__``) para
+    persistir el proveedor elegido, el modelo y la clave de API, de modo que
+    no haya que repetir la elección en cada arranque. No imprime ni registra
+    el valor guardado."""
+    lineas = ruta.read_text(encoding="utf-8").splitlines() if ruta.is_file() else []
+    nueva = f"{clave}={valor}"
+    for i, linea in enumerate(lineas):
+        if linea.strip().startswith(f"{clave}="):
+            lineas[i] = nueva
+            break
+    else:
+        lineas.append(nueva)
+    contenido = "\n".join(lineas) + "\n"
+    if ruta.is_file():
+        os.chmod(ruta, 0o600)  # ya existía con permisos más abiertos: cerrarlos antes de escribir
+    descriptor = os.open(str(ruta), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(descriptor, "w", encoding="utf-8") as archivo:
+        archivo.write(contenido)
+
+
 @dataclass
 class Config:
     motor: str = "auto"  # api | suscripcion | auto (API si hay clave, si no la suscripción)
+    proveedor: str = "anthropic"  # anthropic | openai | ollama (solo aplica con motor=api)
     modelo: str = "claude-opus-5-5"
+    ollama_url: str = "http://localhost:11434"  # base de la API local, si proveedor=ollama
     esfuerzo: str = "low"  # low | medium | high: "low" responde más rápido, ideal para voz
     max_tokens: int = 16000
     nombre_usuario: str = "señor"
@@ -46,7 +72,9 @@ class Config:
         base = cls()
         return cls(
             motor=os.getenv("JARVIS_MOTOR", base.motor).lower(),
+            proveedor=os.getenv("JARVIS_PROVEEDOR", base.proveedor).lower(),
             modelo=os.getenv("JARVIS_MODELO", base.modelo),
+            ollama_url=os.getenv("JARVIS_OLLAMA_URL", base.ollama_url),
             esfuerzo=os.getenv("JARVIS_ESFUERZO", base.esfuerzo),
             max_tokens=int(os.getenv("JARVIS_MAX_TOKENS", base.max_tokens)),
             nombre_usuario=os.getenv("JARVIS_NOMBRE_USUARIO", base.nombre_usuario),
