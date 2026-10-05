@@ -1,8 +1,11 @@
-"""Punto de entrada: python -m jarvis [--texto] [--sin-hud] [--silencio] [--pulsar] [--hud] [--instalar-app].
+"""Punto de entrada: python -m jarvis [--texto] [--sin-hud] [--silencio] [--pulsar] [--hud]
+[--instalar-app] [--reconfigurar-ia].
 
 Por defecto arranca el modo completo: te escucha, te responde hablando y abre
 la animación HUD. Usa --texto para el modo clásico de escribir y leer.
 --instalar-app crea un ícono de escritorio y termina sin arrancar Jarvis.
+--reconfigurar-ia vuelve a preguntar cómo conectar con un modelo de IA
+(local, proveedor en la nube o suscripción), en vez de usar lo ya guardado.
 """
 
 from __future__ import annotations
@@ -18,11 +21,19 @@ from pathlib import Path
 import anthropic
 
 from .cerebro import Cerebro
-from .config import Config
+from .config import Config, guardar_en_env
 from .herramientas import Herramientas
 from .hud import Hud, HudNulo
+from .proveedores import AdaptadorAnthropic, AdaptadorOllama, AdaptadorOpenAI, listar_modelos_ollama
 
 SALIR = {"salir", "cerrar", "cierra", "adiós", "adios", "exit", "quit"}
+
+# Proveedores de IA en la nube soportados por el menú de configuración,
+# con su variable de entorno y dónde conseguir la clave.
+_PROVEEDORES_NUBE = {
+    "1": ("anthropic", "ANTHROPIC_API_KEY", "https://console.anthropic.com"),
+    "2": ("openai", "OPENAI_API_KEY", "https://platform.openai.com/api-keys"),
+}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -39,6 +50,9 @@ def main(argv: list[str] | None = None) -> int:
                         help="Con --texto, abre igual la animación HUD aunque no haya voz.")
     parser.add_argument("--instalar-app", action="store_true",
                         help="Crea un ícono de escritorio para esta instalación y termina.")
+    parser.add_argument("--reconfigurar-ia", action="store_true",
+                        help="Vuelve a preguntar cómo conectar con un modelo de IA (local, "
+                             "proveedor en la nube o suscripción) y guarda la nueva elección.")
     args = parser.parse_args(argv)
 
     if args.instalar_app:
@@ -51,18 +65,16 @@ def main(argv: list[str] | None = None) -> int:
         print("Jarvis ya está abierto (otra instancia sigue corriendo).", file=sys.stderr)
         return 0
 
-    clave_persistente = "ANTHROPIC_API_KEY" in os.environ  # ya venía de .env/entorno real
     try:
-        cerebro = _crear_cerebro(config)
+        cerebro = _crear_cerebro(config, forzar_menu=args.reconfigurar_ia)
     except RuntimeError as error:
         print(error, file=sys.stderr)
         return 1
+    config = cerebro.config  # el menú de configuración puede haber actualizado la elección de IA
 
     try:
         return _ejecutar(args, config, cerebro)
     finally:
-        if not clave_persistente:
-            os.environ.pop("ANTHROPIC_API_KEY", None)  # la del menú no sobrevive a esta ejecución
         _liberar_instancia(config.carpeta_datos)
 
 
@@ -145,10 +157,12 @@ def _bucle_conversacion(args, config: Config, cerebro, hud: HudNulo) -> int:
             respuesta = "Estoy recibiendo demasiadas peticiones. Inténtelo en un momento."
         except anthropic.APIStatusError as error:
             respuesta = f"La API devolvió un error ({error.status_code})."
-        except Exception as error:  # errores del modo suscripción (Claude Code)
-            if type(error).__module__.split(".")[0] != "claude_agent_sdk":
+        except OSError as error:  # típico si Ollama no está corriendo o no responde
+            respuesta = f"No consigo hablar con el modelo local ({error})."
+        except Exception as error:  # errores del modo suscripción (Claude Code) o de OpenAI
+            if type(error).__module__.split(".")[0] not in ("claude_agent_sdk", "openai"):
                 raise
-            respuesta = f"No consigo hablar con Claude Code: {error}"
+            respuesta = f"No consigo hablar con el proveedor de IA: {error}"
         _decir(respuesta, habla, hud, oido)
         if cerebro.herramientas.salir_pedido:
             break
@@ -181,21 +195,30 @@ def _decir(texto: str, habla, hud: HudNulo, oido=None) -> None:
     hud.estado("reposo")
 
 
-def _crear_cerebro(config: Config):
-    """Elige entre la API (clave) y la suscripción de Claude (Claude Code con tu sesión)."""
+def _crear_cerebro(config: Config, forzar_menu: bool = False):
+    """Elige entre la API (con un proveedor de IA) y la suscripción de Claude
+    (Claude Code con tu sesión). ``forzar_menu=True`` (``--reconfigurar-ia``)
+    ignora lo que ya hay configurado y vuelve a preguntar."""
     herramientas = Herramientas(config.carpeta_datos, youtube_api_key=config.youtube_api_key)
     motor = config.motor
-    if motor == "auto":
-        if _hay_credenciales_api():
+    if forzar_menu:
+        if not sys.stdin.isatty():
+            raise RuntimeError("--reconfigurar-ia necesita una terminal interactiva.")
+        motor = _menu_conexion_ia()
+        config = Config.desde_entorno()
+    elif motor == "auto":
+        if _proveedor_configurado() or _hay_credenciales_api():
             motor = "api"
         elif _hay_sesion_claude():
             motor = "suscripcion"
         elif sys.stdin.isatty():
-            motor = _menu_activacion()
+            motor = _menu_conexion_ia()
+            config = Config.desde_entorno()
         else:
             raise RuntimeError(
-                "No encuentro cómo conectar con Claude. Elige una opción:\n"
-                "  - Clave de API: copia .env.example como .env y pon tu ANTHROPIC_API_KEY.\n"
+                "No encuentro cómo conectar con un modelo de IA. Elige una opción:\n"
+                "  - Modelo local: instala Ollama y descarga un modelo (ollama pull qwen3:8b).\n"
+                "  - Clave de API: copia .env.example como .env y pon tu ANTHROPIC_API_KEY u OPENAI_API_KEY.\n"
                 "  - Suscripción Pro/Max: ejecuta `claude` e inicia sesión con /login."
             )
     if motor in ("suscripcion", "suscripción"):
@@ -204,38 +227,59 @@ def _crear_cerebro(config: Config):
         return CerebroSuscripcion(config, herramientas)
     if motor != "api":
         raise RuntimeError(f"JARVIS_MOTOR no válido: {config.motor} (usa api, suscripcion o auto)")
-    if not _hay_credenciales_api():
-        raise RuntimeError("Falta la clave de Claude. Copia .env.example como .env y pon tu ANTHROPIC_API_KEY.")
-    try:
-        return Cerebro(config, herramientas)
-    except anthropic.AnthropicError as error:
-        raise RuntimeError(f"No puedo conectar con Claude: {error}") from error
+    adaptador = _crear_adaptador(config)
+    return Cerebro(config, herramientas, adaptador)
 
 
-def _menu_activacion() -> str:
-    """Pregunta cómo conectar con Claude cuando no hay clave ni suscripción listas.
+def _crear_adaptador(config: Config):
+    """Construye el adaptador de IA (puerto ``ProveedorIA``) según
+    ``config.proveedor``. No conoce nada de Cerebro: solo traduce la
+    configuración elegida en el menú a un adaptador concreto."""
+    if config.proveedor == "anthropic":
+        if not _hay_credenciales_api():
+            raise RuntimeError("Falta la clave de Claude. Copia .env.example como .env y pon tu ANTHROPIC_API_KEY.")
+        try:
+            return AdaptadorAnthropic()
+        except anthropic.AnthropicError as error:
+            raise RuntimeError(f"No puedo conectar con Claude: {error}") from error
+    if config.proveedor == "openai":
+        clave = os.getenv("OPENAI_API_KEY")
+        if not clave:
+            raise RuntimeError("Falta la clave de OpenAI. Copia .env.example como .env y pon tu OPENAI_API_KEY.")
+        return AdaptadorOpenAI(clave=clave)
+    if config.proveedor == "ollama":
+        if not config.modelo:
+            raise RuntimeError(
+                "No hay un modelo local configurado. Ejecuta python -m jarvis --reconfigurar-ia "
+                "para elegir uno."
+            )
+        return AdaptadorOllama(modelo=config.modelo, url=config.ollama_url)
+    raise RuntimeError(f"JARVIS_PROVEEDOR no válido: {config.proveedor} (usa anthropic, openai o ollama)")
 
-    Solo guía, y no persiste nada en disco: la clave que pegues vive solo en
-    esta ejecución (os.environ) y se pierde al cerrar Jarvis. Si no quieres
-    repetirlo cada vez, pon la clave vos mismo en .env.
+
+def _menu_conexion_ia() -> str:
+    """Pregunta cómo conectar con un modelo de IA cuando no hay nada
+    configurado todavía (o cuando se pide explícitamente con
+    ``--reconfigurar-ia``).
+
+    A diferencia del menú original, esta elección SÍ se persiste en .env
+    (proveedor, modelo y clave si aplica) para no repetirla en cada
+    arranque; usa --reconfigurar-ia para volver a elegir.
     """
-    print("No encuentro cómo conectar con Claude. ¿Cómo quieres activarlo?")
-    print("  1) Ya tengo (o voy a pegar ahora) una clave de API")
-    print("  2) Uso mi suscripción Pro/Max de Claude")
+    print("No encuentro cómo conectar con un modelo de IA. ¿Qué querés usar?")
+    print("  1) Un modelo local (Ollama)")
+    print("  2) Un proveedor en la nube (API key)")
+    print("  3) Mi suscripción Pro/Max de Claude")
     try:
-        eleccion = input("Elige 1 o 2: ").strip()
+        eleccion = input("Elige 1, 2 o 3: ").strip()
     except (EOFError, KeyboardInterrupt):
         eleccion = ""
 
     if eleccion == "1":
-        clave = getpass.getpass("Pega tu ANTHROPIC_API_KEY (de https://console.anthropic.com): ").strip()
-        if not clave:
-            raise RuntimeError("No diste ninguna clave. Copia .env.example como .env y pon tu ANTHROPIC_API_KEY.")
-        os.environ["ANTHROPIC_API_KEY"] = clave
-        print("(clave activa solo para esta sesión; se pierde al cerrar Jarvis)")
-        return "api"
-
+        return _configurar_local()
     if eleccion == "2":
+        return _configurar_proveedor_nube()
+    if eleccion == "3":
         if not _hay_sesion_claude():
             raise RuntimeError(
                 "Todavía no iniciaste sesión. Hazlo y vuelve a ejecutar python -m jarvis:\n"
@@ -245,10 +289,74 @@ def _menu_activacion() -> str:
         return "suscripcion"
 
     raise RuntimeError(
-        "No encuentro cómo conectar con Claude. Elige una opción:\n"
-        "  - Clave de API: copia .env.example como .env y pon tu ANTHROPIC_API_KEY.\n"
+        "No encuentro cómo conectar con un modelo de IA. Elige una opción:\n"
+        "  - Modelo local: instala Ollama y descarga un modelo (ollama pull qwen3:8b).\n"
+        "  - Clave de API: copia .env.example como .env y pon tu ANTHROPIC_API_KEY u OPENAI_API_KEY.\n"
         "  - Suscripción Pro/Max: ejecuta `claude` e inicia sesión con /login."
     )
+
+
+def _configurar_local() -> str:
+    """Lista los modelos instalados en Ollama y deja elegir uno."""
+    try:
+        modelos = listar_modelos_ollama()
+    except OSError as error:
+        raise RuntimeError(
+            f"No consigo hablar con Ollama ({error}). ¿Está corriendo? Probá "
+            "`ollama serve`, o instalalo desde https://ollama.com."
+        ) from error
+    if not modelos:
+        raise RuntimeError(
+            "Ollama está corriendo pero no tiene modelos instalados. Probá `ollama pull qwen3:8b`."
+        )
+
+    print("Modelos locales instalados:")
+    for i, nombre in enumerate(modelos, start=1):
+        print(f"  {i}) {nombre}")
+    try:
+        indice = int(input(f"Elige 1-{len(modelos)}: ").strip()) - 1
+        if indice < 0:
+            raise ValueError
+        modelo = modelos[indice]
+    except (ValueError, IndexError, EOFError, KeyboardInterrupt) as error:
+        raise RuntimeError("No elegiste un modelo local válido.") from error
+
+    guardar_en_env("JARVIS_PROVEEDOR", "ollama")
+    guardar_en_env("JARVIS_MODELO", modelo)
+    guardar_en_env("JARVIS_MOTOR", "api")
+    os.environ["JARVIS_PROVEEDOR"] = "ollama"
+    os.environ["JARVIS_MODELO"] = modelo
+    os.environ["JARVIS_MOTOR"] = "api"
+    print(f"(usando el modelo local {modelo}; elección guardada en .env)")
+    return "api"
+
+
+def _configurar_proveedor_nube() -> str:
+    """Lista los proveedores en la nube soportados y pide (y guarda) la clave de API."""
+    print("Proveedores soportados:")
+    print("  1) Anthropic (Claude)")
+    print("  2) OpenAI")
+    try:
+        eleccion = input("Elige 1 o 2: ").strip()
+    except (EOFError, KeyboardInterrupt):
+        eleccion = ""
+
+    if eleccion not in _PROVEEDORES_NUBE:
+        raise RuntimeError("No elegiste un proveedor válido.")
+    proveedor, variable, url = _PROVEEDORES_NUBE[eleccion]
+
+    clave = getpass.getpass(f"Pega tu {variable} (de {url}): ").strip()
+    if not clave:
+        raise RuntimeError(f"No diste ninguna clave. Copia .env.example como .env y pon tu {variable}.")
+
+    guardar_en_env(variable, clave)
+    guardar_en_env("JARVIS_PROVEEDOR", proveedor)
+    guardar_en_env("JARVIS_MOTOR", "api")
+    os.environ[variable] = clave
+    os.environ["JARVIS_PROVEEDOR"] = proveedor
+    os.environ["JARVIS_MOTOR"] = "api"
+    print(f"(clave guardada en .env; usando {proveedor})")
+    return "api"
 
 
 def _tomar_instancia_unica(carpeta_datos: Path) -> bool:
@@ -301,6 +409,13 @@ def _hay_credenciales_api() -> bool:
     """Clave en el entorno o perfil guardado con `ant auth login`."""
     return bool(os.getenv("ANTHROPIC_API_KEY") or os.getenv("ANTHROPIC_AUTH_TOKEN")
                 or (Path.home() / ".config" / "anthropic").is_dir())
+
+
+def _proveedor_configurado() -> bool:
+    """¿Ya se eligió explícitamente un proveedor de IA (vía .env o el menú de
+    configuración) en algún arranque anterior? Cubre el caso de Ollama, que
+    no tiene una clave que revisar."""
+    return "JARVIS_PROVEEDOR" in os.environ
 
 
 if __name__ == "__main__":
