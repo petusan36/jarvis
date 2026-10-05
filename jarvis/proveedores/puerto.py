@@ -1,10 +1,10 @@
 """Puerto (interfaz) que todo proveedor de IA debe implementar.
 
 ``Cerebro`` solo conoce esta interfaz y los tipos de este módulo: no sabe
-nada de anthropic, openai ni ollama. Cada proveedor vive en su propio
-adaptador (ver ``anthropic_adaptador.py``, ``openai_adaptador.py`` y
-``ollama_adaptador.py``) y traduce entre este formato neutral y el formato
-nativo de su API, incluyendo el de las herramientas (tool-calling).
+nada de anthropic ni de ollama. Cada proveedor vive en su propio adaptador
+(ver ``anthropic_adaptador.py`` y ``ollama_adaptador.py``) y traduce entre
+este formato neutral y el formato nativo de su API, incluyendo el de las
+herramientas (tool-calling).
 
 El historial de la conversación (``Cerebro.historial``) se guarda en estos
 mismos tipos neutrales (``TurnoUsuario``, ``TurnoAsistente``,
@@ -95,8 +95,8 @@ class ProveedorIA(ABC):
     """Puerto abstracto para un proveedor de IA con tool-calling.
 
     ``Cerebro`` depende únicamente de esta interfaz (inyección de
-    dependencia): no construye ni conoce clientes concretos de anthropic,
-    openai u ollama.
+    dependencia): no construye ni conoce clientes concretos de anthropic
+    ni de ollama.
     """
 
     @abstractmethod

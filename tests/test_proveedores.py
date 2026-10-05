@@ -11,12 +11,9 @@ import pytest
 from jarvis.proveedores import (
     AdaptadorAnthropic,
     AdaptadorOllama,
-    AdaptadorOpenAI,
     BloqueTexto,
     BloqueUsoHerramienta,
-    ResultadoHerramienta,
     TurnoAsistente,
-    TurnoResultadoHerramienta,
     TurnoUsuario,
     listar_modelos_ollama,
 )
@@ -120,78 +117,6 @@ def test_adaptador_anthropic_reenvia_bruto_para_preservar_razonamiento():
 
     mensajes_segunda_llamada = cliente.peticiones[1]["messages"]
     assert mensajes_segunda_llamada[1]["content"] == [bloque_razonamiento, bloque_texto]
-
-
-# --- AdaptadorOpenAI ---------------------------------------------------------
-
-class _ClienteOpenAIFalso:
-    def __init__(self, respuestas):
-        self.respuestas = list(respuestas)
-        self.peticiones = []
-        self.chat = NS(completions=NS(create=self._create))
-
-    def _create(self, **kwargs):
-        self.peticiones.append(kwargs)
-        return self.respuestas.pop(0)
-
-
-def _respuesta_openai(mensaje, finish_reason):
-    return NS(choices=[NS(message=mensaje, finish_reason=finish_reason)])
-
-
-def test_adaptador_openai_respuesta_de_texto():
-    mensaje = NS(content="Son 42, señor.", tool_calls=None)
-    cliente = _ClienteOpenAIFalso([_respuesta_openai(mensaje, "stop")])
-
-    respuesta = AdaptadorOpenAI(cliente=cliente).responder(**_kwargs_comunes())
-
-    assert respuesta.detenida_por == "texto"
-    assert respuesta.contenido == [BloqueTexto(texto="Son 42, señor.")]
-    peticion = cliente.peticiones[0]
-    assert peticion["messages"][0] == {"role": "system", "content": "Sos Jarvis."}
-    assert peticion["tools"][0]["function"]["name"] == "calcular"
-
-
-def test_adaptador_openai_respuesta_con_herramienta_y_traduce_tools():
-    llamada = NS(id="call_1", function=NS(name="calcular", arguments=json.dumps({"expresion": "6*7"})))
-    mensaje = NS(content=None, tool_calls=[llamada])
-    cliente = _ClienteOpenAIFalso([_respuesta_openai(mensaje, "tool_calls")])
-
-    respuesta = AdaptadorOpenAI(cliente=cliente).responder(**_kwargs_comunes())
-
-    assert respuesta.detenida_por == "herramienta"
-    assert respuesta.contenido == [BloqueUsoHerramienta(id="call_1", nombre="calcular", entrada={"expresion": "6*7"})]
-
-
-def test_adaptador_openai_longitud_y_resultado_de_herramienta_por_mensaje():
-    mensaje = NS(content="corto", tool_calls=None)
-    cliente = _ClienteOpenAIFalso([_respuesta_openai(mensaje, "length")])
-    adaptador = AdaptadorOpenAI(cliente=cliente)
-
-    turno_resultado = TurnoResultadoHerramienta(
-        resultados=[ResultadoHerramienta(id_uso="call_1", contenido="42", es_error=False)]
-    )
-    respuesta = adaptador.responder(**{**_kwargs_comunes(), "mensajes": [TurnoUsuario(texto="hola"), turno_resultado]})
-
-    assert respuesta.detenida_por == "longitud"
-    mensajes_enviados = cliente.peticiones[0]["messages"]
-    assert mensajes_enviados[-1] == {"role": "tool", "tool_call_id": "call_1", "content": "42"}
-
-
-def test_adaptador_openai_sin_cliente_ni_paquete_instalado_da_error_claro(monkeypatch):
-    import builtins
-
-    original_import = builtins.__import__
-
-    def import_falso(nombre, *args, **kwargs):
-        if nombre == "openai":
-            raise ImportError("no module named openai")
-        return original_import(nombre, *args, **kwargs)
-
-    monkeypatch.setattr(builtins, "__import__", import_falso)
-
-    with pytest.raises(RuntimeError, match="openai"):
-        AdaptadorOpenAI(clave="sk-x")
 
 
 # --- AdaptadorOllama ---------------------------------------------------------
