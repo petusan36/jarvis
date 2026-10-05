@@ -379,50 +379,67 @@ def test_auto_sin_clave_ni_sesion_pide_menu(monkeypatch, tmp_path):
         _crear_cerebro(Config(carpeta_datos=tmp_path))
 
 
-def test_menu_conexion_opcion_nube_anthropic_persiste_en_disco(monkeypatch, tmp_path):
+def test_menu_conexion_opcion_claude_persiste_motor_sin_clave(monkeypatch, tmp_path):
+    """Claude se conecta con la sesión de Claude Code: el menú no pide ni
+    guarda ninguna clave, solo el motor elegido."""
     from jarvis.__main__ import _menu_conexion_ia
 
     monkeypatch.chdir(tmp_path)
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    entradas = iter(["2", "1"])  # 2) proveedor en la nube -> 1) Anthropic
-    monkeypatch.setattr("builtins.input", lambda _="": next(entradas))
-    monkeypatch.setattr("getpass.getpass", lambda _: "sk-ant-prueba")
+    monkeypatch.setattr("builtins.input", lambda _="": "2")
+    monkeypatch.setattr("jarvis.__main__._hay_sesion_claude", lambda: True)
 
-    assert _menu_conexion_ia() == "api"
-    assert os.environ["ANTHROPIC_API_KEY"] == "sk-ant-prueba"
-    assert os.environ["JARVIS_PROVEEDOR"] == "anthropic"
-
+    assert _menu_conexion_ia() == "suscripcion"
+    assert os.environ["JARVIS_MOTOR"] == "suscripcion"
     env = (tmp_path / ".env").read_text()
-    assert "ANTHROPIC_API_KEY=sk-ant-prueba" in env
-    assert "JARVIS_PROVEEDOR=anthropic" in env
-    permisos = (tmp_path / ".env").stat().st_mode & 0o777
-    assert permisos == 0o600
+    assert "JARVIS_MOTOR=suscripcion" in env
+    assert "ANTHROPIC_API_KEY" not in env
 
 
-def test_menu_conexion_opcion_nube_openai_persiste_en_disco(monkeypatch, tmp_path):
+def test_menu_conexion_opcion_claude_sin_sesion_falla(monkeypatch):
+    from jarvis.__main__ import _menu_conexion_ia
+
+    monkeypatch.setattr("builtins.input", lambda _="": "2")
+    monkeypatch.setattr("jarvis.__main__._hay_sesion_claude", lambda: False)
+
+    with pytest.raises(RuntimeError, match="sesión"):
+        _menu_conexion_ia()
+
+
+def test_menu_conexion_opcion_codex_persiste_motor_sin_clave(monkeypatch, tmp_path):
+    """Codex se conecta con la sesión de Codex CLI: el menú no pide ni
+    guarda ninguna clave, solo el motor elegido."""
     from jarvis.__main__ import _menu_conexion_ia
 
     monkeypatch.chdir(tmp_path)
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    entradas = iter(["2", "2"])  # 2) proveedor en la nube -> 2) OpenAI
-    monkeypatch.setattr("builtins.input", lambda _="": next(entradas))
-    monkeypatch.setattr("getpass.getpass", lambda _: "sk-prueba-openai")
+    monkeypatch.setattr("builtins.input", lambda _="": "3")
+    monkeypatch.setattr("jarvis.__main__.shutil.which", lambda _cmd: "/usr/local/bin/codex")
+    monkeypatch.setattr("jarvis.__main__._hay_sesion_codex", lambda: True)
 
-    assert _menu_conexion_ia() == "api"
-    assert os.environ["OPENAI_API_KEY"] == "sk-prueba-openai"
-    assert os.environ["JARVIS_PROVEEDOR"] == "openai"
-    assert "OPENAI_API_KEY=sk-prueba-openai" in (tmp_path / ".env").read_text()
+    assert _menu_conexion_ia() == "codex"
+    assert os.environ["JARVIS_MOTOR"] == "codex"
+    env = (tmp_path / ".env").read_text()
+    assert "JARVIS_MOTOR=codex" in env
+    assert "OPENAI_API_KEY" not in env and "sk-" not in env
 
 
-def test_menu_conexion_opcion_nube_sin_clave_falla(monkeypatch, tmp_path):
+def test_menu_conexion_opcion_codex_sin_cli_instalada_falla(monkeypatch):
     from jarvis.__main__ import _menu_conexion_ia
 
-    monkeypatch.chdir(tmp_path)
-    entradas = iter(["2", "1"])
-    monkeypatch.setattr("builtins.input", lambda _="": next(entradas))
-    monkeypatch.setattr("getpass.getpass", lambda _: "")
+    monkeypatch.setattr("builtins.input", lambda _="": "3")
+    monkeypatch.setattr("jarvis.__main__.shutil.which", lambda _cmd: None)
 
-    with pytest.raises(RuntimeError, match="ANTHROPIC_API_KEY"):
+    with pytest.raises(RuntimeError, match="Codex CLI"):
+        _menu_conexion_ia()
+
+
+def test_menu_conexion_opcion_codex_sin_sesion_falla(monkeypatch):
+    from jarvis.__main__ import _menu_conexion_ia
+
+    monkeypatch.setattr("builtins.input", lambda _="": "3")
+    monkeypatch.setattr("jarvis.__main__.shutil.which", lambda _cmd: "/usr/local/bin/codex")
+    monkeypatch.setattr("jarvis.__main__._hay_sesion_codex", lambda: False)
+
+    with pytest.raises(RuntimeError, match="sesión en Codex"):
         _menu_conexion_ia()
 
 
@@ -466,25 +483,6 @@ def test_menu_conexion_opcion_local_sin_modelos_instalados(monkeypatch, tmp_path
 
     with pytest.raises(RuntimeError, match="modelos instalados"):
         _menu_conexion_ia()
-
-
-def test_menu_conexion_opcion_suscripcion_sin_sesion(monkeypatch):
-    from jarvis.__main__ import _menu_conexion_ia
-
-    monkeypatch.setattr("builtins.input", lambda _="": "3")
-    monkeypatch.setattr("jarvis.__main__._hay_sesion_claude", lambda: False)
-
-    with pytest.raises(RuntimeError, match="sesión"):
-        _menu_conexion_ia()
-
-
-def test_menu_conexion_opcion_suscripcion_con_sesion(monkeypatch):
-    from jarvis.__main__ import _menu_conexion_ia
-
-    monkeypatch.setattr("builtins.input", lambda _="": "3")
-    monkeypatch.setattr("jarvis.__main__._hay_sesion_claude", lambda: True)
-
-    assert _menu_conexion_ia() == "suscripcion"
 
 
 def test_menu_conexion_opcion_invalida_falla(monkeypatch):
