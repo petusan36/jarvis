@@ -119,6 +119,23 @@ def test_pagina_principal_incluye_el_token_real():
         servidor.cerrar()
 
 
+def test_host_falsificado_da_403():
+    """DNS rebinding: un dominio de un atacante puede resolver a 127.0.0.1,
+    pero el encabezado Host que manda el navegador sigue siendo el suyo,
+    no 127.0.0.1 — eso es lo que detecta y bloquea este chequeo."""
+    servidor = ServidorMenu()
+    try:
+        peticion = urllib.request.Request(servidor.url, headers={"Host": "atacante.com"})
+        try:
+            urllib.request.urlopen(peticion, timeout=5)
+        except urllib.error.HTTPError as error:
+            assert error.code == 403
+        else:
+            raise AssertionError("esperaba un 403 con Host falsificado")
+    finally:
+        servidor.cerrar()
+
+
 def test_esperar_accion_sin_nada_agota_el_timeout():
     servidor = ServidorMenu()
     try:

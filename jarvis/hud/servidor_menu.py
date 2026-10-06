@@ -85,7 +85,20 @@ def _crear_servidor(puerto: int, servidor_menu: ServidorMenu) -> ThreadingHTTPSe
     pagina = plantilla.replace("__JARVIS_TOKEN__", servidor_menu.token).encode("utf-8")
 
     class Manejador(BaseHTTPRequestHandler):
+        def _host_valido(self) -> bool:
+            """Defensa contra DNS rebinding: un dominio controlado por un
+            atacante puede apuntar a 127.0.0.1 después de que el navegador
+            ya lo trató como "mismo origen" que su propio JS, lo que deja
+            leer el token embebido en la página (burlando esa protección)
+            en vez de solo adivinarlo. El encabezado Host que manda el
+            navegador sigue siendo el del dominio del atacante, no
+            127.0.0.1 — por eso alcanza con exigir que coincida."""
+            return self.headers.get("Host", "") == f"127.0.0.1:{self.server.server_address[1]}"
+
         def do_GET(self):
+            if not self._host_valido():
+                self._enviar(403, "text/plain; charset=utf-8", b"Host invalido")
+                return
             if self.path == "/":
                 self._enviar(200, "text/html; charset=utf-8", pagina)
             elif self.path == "/estado":
@@ -95,6 +108,9 @@ def _crear_servidor(puerto: int, servidor_menu: ServidorMenu) -> ThreadingHTTPSe
                 self._enviar(404, "text/plain; charset=utf-8", b"No encontrado")
 
         def do_POST(self):
+            if not self._host_valido():
+                self._enviar(403, "text/plain; charset=utf-8", b"Host invalido")
+                return
             if self.path != "/accion":
                 self._enviar(404, "text/plain; charset=utf-8", b"No encontrado")
                 return
