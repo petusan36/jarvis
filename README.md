@@ -1,11 +1,19 @@
 # J.A.R.V.I.S.
 
 Asistente personal por voz inspirado en el Jarvis de Iron Man. Te escucha con
-**Whisper**, piensa con **Claude** (que puede usar herramientas) y te responde
-**hablando**. También tiene un **modo texto** para probarlo sin micrófono.
+**Whisper**, piensa con un modelo de IA (que puede usar herramientas) y te
+responde **hablando**. También tiene un **modo texto** para probarlo sin
+micrófono.
+
+Elegís de dónde viene la IA en el menú de cada arranque — sin pegar ninguna
+clave en ningún caso:
+
+- **Local (Ollama)**: corre entero en tu máquina, sin internet ni cuenta de nadie.
+- **Claude**: tu suscripción Pro/Max, vía Claude Code.
+- **Codex/OpenAI**: tu sesión de ChatGPT, vía Codex CLI.
 
 ```
-micrófono ──► Whisper (oido.py) ──► Claude + herramientas (cerebro.py) ──► voz (habla.py)
+micrófono ──► Whisper (oido.py) ──► modelo de IA + herramientas (cerebro.py) ──► voz (habla.py)
                                       │
                                       └── fecha y hora, calculadora, notas, carpetas, apps…
 ```
@@ -30,9 +38,18 @@ micrófono ──► Whisper (oido.py) ──► Claude + herramientas (cerebro.
 > | Ubuntu / Debian | `sudo apt install python3.12 python3.12-venv` |
 > | Windows | instala 3.12 desde <https://python.org/downloads> (marca "Add to PATH") |
 
-- Una de estas dos formas de conectar con Claude:
-  - **Clave de API** (pago por uso): créala en <https://console.anthropic.com>
-  - **Tu suscripción Pro o Max**, a través de Claude Code (ver más abajo)
+- Una de estas tres formas de conectar con un modelo de IA (elegís en el menú,
+  no hace falta decidir ahora):
+  - **Local, sin cuenta ni clave**: instalá [Ollama](https://ollama.com) y
+    bajá un modelo — ver [Modelo local (Ollama)](#modelo-local-ollama) más
+    abajo.
+  - **Tu suscripción Claude Pro/Max**, a través de Claude Code (`claude`
+    instalado, `/login` hecho).
+  - **Tu sesión de ChatGPT**, a través de Codex CLI (`npm install -g
+    @openai/codex`, `codex login` hecho).
+  - (Alternativa menos recomendada: clave de API de Anthropic, de pago por
+    uso, en <https://console.anthropic.com> — no pasa por el menú, se pone
+    directo en `.env`.)
 - **espeak-ng**, para que Kokoro pueda hablar español (ver tabla más abajo)
 
 ## Instalación
@@ -60,6 +77,24 @@ pip install -e .
 Si al instalar ves `ERROR: Could not find a version that satisfies the
 requirement kokoro`, tu `.venv` quedó creado con una versión de Python
 equivocada: borralo (`rm -rf .venv`) y repetí desde `python3.12 -m venv .venv`.
+
+## Modelo local (Ollama)
+
+Si vas a usar **Local** en el menú, instalá [Ollama](https://ollama.com) y
+bajá al menos un modelo ANTES de arrancar Jarvis por primera vez — el menú
+solo lista lo que ya esté instalado, no instala nada por vos:
+
+```bash
+brew install ollama              # macOS (Linux/Windows: https://ollama.com/download)
+ollama serve &                   # si no corre ya como servicio
+ollama pull qwen3:8b             # modelo principal: razonamiento + tool-calling
+ollama pull qwen3-vl:4b          # opcional: visión (todavía sin conectar como herramienta)
+ollama pull nomic-embed-text     # opcional: solo si vas a activar memoria (JARVIS_MEMORIA=1)
+```
+
+`qwen3:8b` es el único imprescindible para que Jarvis funcione en modo local.
+Podés usar otro modelo que ya tengas (cualquiera que Ollama liste), pero sin
+tool-calling real Jarvis no puede usar sus herramientas (hora, notas, etc.).
 
 ## Conectar con un modelo de IA: el menú de cada arranque
 
@@ -104,7 +139,7 @@ mostrar el menú y Jarvis falla con un mensaje claro.
 `--reconfigurar-ia` ya no tiene efecto propio (el menú corre siempre); se
 conserva solo por compatibilidad con scripts o accesos existentes.
 
-Ten en cuenta:
+Ten en cuenta, solo si elegís **Claude (suscripción)**:
 
 - **Es solo para uso personal en tu equipo.** Las condiciones de Anthropic
   permiten usar tu suscripción con Claude Code y el Agent SDK para uso
@@ -115,6 +150,8 @@ Ten en cuenta:
 - **Responde algo más lento** que con la API, porque arranca Claude Code por debajo.
 - Jarvis desactiva las herramientas propias de Claude Code (terminal, editar
   archivos): solo puede usar las suyas.
+
+(Local y Codex/OpenAI no tienen estas limitaciones particulares.)
 
 ## Modo completo (por defecto): voz + HUD
 
