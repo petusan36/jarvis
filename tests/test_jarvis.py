@@ -93,6 +93,8 @@ def test_modo_texto_de_principio_a_fin(monkeypatch, tmp_path, capsys):
     monkeypatch.setenv("JARVIS_CARPETA_DATOS", str(tmp_path))
     monkeypatch.setenv("ANTHROPIC_API_KEY", "prueba")
     monkeypatch.setattr("jarvis.proveedores.anthropic_adaptador.anthropic.Anthropic", lambda: cliente)
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.setattr("jarvis.__main__._menu_conexion_ia", lambda: "api")
     entradas = iter(["hola", "salir"])
     monkeypatch.setattr("builtins.input", lambda _="": next(entradas))
 
@@ -110,6 +112,8 @@ def test_jarvis_se_cierra_solo_por_decision_de_claude(monkeypatch, tmp_path, cap
     monkeypatch.setenv("JARVIS_CARPETA_DATOS", str(tmp_path))
     monkeypatch.setenv("ANTHROPIC_API_KEY", "prueba")
     monkeypatch.setattr("jarvis.proveedores.anthropic_adaptador.anthropic.Anthropic", lambda: cliente)
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.setattr("jarvis.__main__._menu_conexion_ia", lambda: "api")
     entradas = iter(["ya terminamos por hoy, cerrate"])  # nunca dice "salir" literal
     monkeypatch.setattr("builtins.input", lambda _="": next(entradas))
 
@@ -196,6 +200,8 @@ def test_modo_texto_con_hud(monkeypatch, tmp_path):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "prueba")
     monkeypatch.setattr("jarvis.proveedores.anthropic_adaptador.anthropic.Anthropic", lambda: cliente)
     monkeypatch.setattr("jarvis.__main__.Hud", HudFalso)
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.setattr("jarvis.__main__._menu_conexion_ia", lambda: "api")
     entradas = iter(["hola", "salir"])
     monkeypatch.setattr("builtins.input", lambda _="": next(entradas))
 
@@ -246,6 +252,8 @@ def test_modo_completo_por_defecto_usa_voz_y_hud(monkeypatch, tmp_path):
     monkeypatch.setattr("jarvis.__main__.Hud", _HudFalso)
     monkeypatch.setattr("jarvis.voz.oido.Oido", _OidoFalso)
     monkeypatch.setattr("jarvis.voz.habla.crear_habla", lambda _config: _HablaFalsa())
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.setattr("jarvis.__main__._menu_conexion_ia", lambda: "api")
 
     assert main([]) == 0
     assert _HudFalso.instancias == 1  # el HUD se abre solo, sin pasar --hud
@@ -261,6 +269,8 @@ def test_usa_ventana_nativa_si_esta_disponible_en_macos(monkeypatch, tmp_path):
     monkeypatch.setattr("jarvis.__main__.Hud", _HudFalso)
     monkeypatch.setattr("jarvis.voz.oido.Oido", _OidoFalso)
     monkeypatch.setattr("jarvis.voz.habla.crear_habla", lambda _config: _HablaFalsa())
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.setattr("jarvis.__main__._menu_conexion_ia", lambda: "api")
 
     llamadas = []
 
@@ -285,6 +295,8 @@ def test_sin_hud_mantiene_modo_voz(monkeypatch, tmp_path):
     monkeypatch.setattr("jarvis.__main__.Hud", _HudFalso)
     monkeypatch.setattr("jarvis.voz.oido.Oido", _OidoFalso)
     monkeypatch.setattr("jarvis.voz.habla.crear_habla", lambda _config: _HablaFalsa())
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.setattr("jarvis.__main__._menu_conexion_ia", lambda: "api")
 
     assert main(["--sin-hud"]) == 0
     assert _HudFalso.instancias == 0  # --sin-hud no abre el HUD, pero la voz sigue activa
@@ -352,94 +364,87 @@ def test_suscripcion_herramientas_mcp(herramientas):
     assert salida == {"content": [{"type": "text", "text": "42"}], "is_error": False}
 
 
-def test_auto_sin_clave_usa_suscripcion(monkeypatch, tmp_path):
-    pytest.importorskip("claude_agent_sdk")
+def test_menu_siempre_corre_incluso_con_todo_configurado(monkeypatch, tmp_path):
+    """Ya no hay modo "auto" que salte el menú porque hay JARVIS_PROVEEDOR,
+    una API key o una sesión detectada: el menú corre siempre."""
     from jarvis.__main__ import _crear_cerebro
     from jarvis.cerebro_suscripcion import CerebroSuscripcion
 
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    monkeypatch.delenv("ANTHROPIC_AUTH_TOKEN", raising=False)
+    pytest.importorskip("claude_agent_sdk")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "ya-configurada")
+    monkeypatch.setenv("JARVIS_PROVEEDOR", "anthropic")
     monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
     monkeypatch.setattr("jarvis.__main__._hay_sesion_claude", lambda: True)
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    entradas = iter(["2", "2"])  # proveedor en la nube -> Anthropic (ya logueado)
+    monkeypatch.setattr("builtins.input", lambda _="": next(entradas))
+
     cerebro = _crear_cerebro(Config(carpeta_datos=tmp_path))
+
     assert isinstance(cerebro, CerebroSuscripcion)
     cerebro.cerrar()
 
 
-def test_auto_sin_clave_ni_sesion_claude_usa_codex(monkeypatch, tmp_path):
-    """Si no hay clave ni sesión de Claude pero sí sesión de Codex, el modo
-    auto arma el Cerebro con el adaptador de Codex directamente (motor
-    propio `codex`, no `proveedor=codex` bajo `motor=api`)."""
-    from jarvis.__main__ import _crear_cerebro
-    from jarvis.cerebro import Cerebro
-    from jarvis.proveedores import AdaptadorCodexResponses, MODELO_CODEX_POR_DEFECTO
-
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    monkeypatch.delenv("ANTHROPIC_AUTH_TOKEN", raising=False)
-    monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
-    monkeypatch.setattr("jarvis.__main__._hay_sesion_claude", lambda: False)
-    monkeypatch.setattr("jarvis.__main__._hay_sesion_codex", lambda: True)
-    monkeypatch.setattr(
-        "jarvis.__main__.AdaptadorCodexResponses", lambda: AdaptadorCodexResponses(token="tok-falso")
-    )
-
-    cerebro = _crear_cerebro(Config(carpeta_datos=tmp_path))
-
-    assert isinstance(cerebro, Cerebro)
-    assert isinstance(cerebro.proveedor, AdaptadorCodexResponses)
-    assert cerebro.config.modelo == MODELO_CODEX_POR_DEFECTO
-
-
-def test_auto_sin_clave_ni_sesion_pide_menu(monkeypatch, tmp_path):
+def test_sin_tty_no_puede_mostrar_el_menu(monkeypatch, tmp_path):
     from jarvis.__main__ import _crear_cerebro
 
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    monkeypatch.delenv("ANTHROPIC_AUTH_TOKEN", raising=False)
-    monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
-    monkeypatch.setattr("jarvis.__main__._hay_sesion_claude", lambda: False)
     monkeypatch.setattr("sys.stdin.isatty", lambda: False)
 
-    with pytest.raises(RuntimeError, match="No encuentro"):
+    with pytest.raises(RuntimeError, match="terminal interactiva"):
         _crear_cerebro(Config(carpeta_datos=tmp_path))
 
 
-def test_menu_conexion_opcion_claude_persiste_motor_sin_clave(monkeypatch, tmp_path):
-    """Claude se conecta con la sesión de Claude Code: el menú no pide ni
-    guarda ninguna clave, solo el motor elegido."""
+def test_menu_conexion_opcion_nube_pide_sub_menu_proveedor(monkeypatch, tmp_path):
+    """Nivel 1 del menú: local o proveedor. Elegir proveedor abre el nivel 2."""
     from jarvis.__main__ import _menu_conexion_ia
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr("builtins.input", lambda _="": "2")
+    llamado = {}
+    monkeypatch.setattr(
+        "jarvis.__main__._menu_proveedor_nube", lambda: llamado.setdefault("si", True) and "codex"
+    )
+
+    assert _menu_conexion_ia() == "codex"
+    assert llamado == {"si": True}
+
+
+def test_menu_conexion_opcion_invalida_en_nivel_uno_falla(monkeypatch):
+    from jarvis.__main__ import _menu_conexion_ia
+
+    monkeypatch.setattr("builtins.input", lambda _="": "9")
+
+    with pytest.raises(RuntimeError, match="No encuentro"):
+        _menu_conexion_ia()
+
+
+def test_menu_proveedor_nube_opcion_anthropic_persiste_motor_sin_clave(monkeypatch, tmp_path):
+    """Claude se conecta con la sesión de Claude Code: el menú no pide ni
+    guarda ninguna clave, solo el motor elegido."""
+    from jarvis.__main__ import _menu_proveedor_nube
+
+    monkeypatch.setattr("jarvis.config._RUTA_ENV_POR_DEFECTO", tmp_path / ".env")
+    monkeypatch.setattr("builtins.input", lambda _="": "2")
     monkeypatch.setattr("jarvis.__main__._hay_sesion_claude", lambda: True)
 
-    assert _menu_conexion_ia() == "suscripcion"
+    assert _menu_proveedor_nube() == "suscripcion"
     assert os.environ["JARVIS_MOTOR"] == "suscripcion"
     env = (tmp_path / ".env").read_text()
     assert "JARVIS_MOTOR=suscripcion" in env
     assert "ANTHROPIC_API_KEY" not in env
 
 
-def test_menu_conexion_opcion_claude_sin_sesion_falla(monkeypatch):
-    from jarvis.__main__ import _menu_conexion_ia
-
-    monkeypatch.setattr("builtins.input", lambda _="": "2")
-    monkeypatch.setattr("jarvis.__main__._hay_sesion_claude", lambda: False)
-
-    with pytest.raises(RuntimeError, match="sesión"):
-        _menu_conexion_ia()
-
-
-def test_menu_conexion_opcion_codex_persiste_proveedor_sin_clave(monkeypatch, tmp_path):
+def test_menu_proveedor_nube_opcion_openai_persiste_proveedor_sin_clave(monkeypatch, tmp_path):
     """Codex habla directo contra el endpoint de Responses API con la
     sesión de Codex CLI: el menú no pide ni guarda ninguna clave, y no
     hace falta tener la CLI instalada (solo haber hecho codex login)."""
-    from jarvis.__main__ import _menu_conexion_ia
+    from jarvis.__main__ import _menu_proveedor_nube
 
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr("builtins.input", lambda _="": "3")
+    monkeypatch.setattr("jarvis.config._RUTA_ENV_POR_DEFECTO", tmp_path / ".env")
+    monkeypatch.setattr("builtins.input", lambda _="": "1")
     monkeypatch.setattr("jarvis.__main__._hay_sesion_codex", lambda: True)
 
-    assert _menu_conexion_ia() == "codex"
+    assert _menu_proveedor_nube() == "codex"
     assert os.environ["JARVIS_MOTOR"] == "codex"
     env = (tmp_path / ".env").read_text()
     assert "JARVIS_MOTOR=codex" in env
@@ -447,20 +452,142 @@ def test_menu_conexion_opcion_codex_persiste_proveedor_sin_clave(monkeypatch, tm
     assert "OPENAI_API_KEY" not in env and "sk-" not in env
 
 
-def test_menu_conexion_opcion_codex_sin_sesion_falla(monkeypatch):
-    from jarvis.__main__ import _menu_conexion_ia
+def test_menu_proveedor_nube_opcion_invalida_falla(monkeypatch):
+    from jarvis.__main__ import _menu_proveedor_nube
 
-    monkeypatch.setattr("builtins.input", lambda _="": "3")
+    monkeypatch.setattr("builtins.input", lambda _="": "9")
+
+    with pytest.raises(RuntimeError, match="No encuentro"):
+        _menu_proveedor_nube()
+
+
+# --- login programático (Claude y Codex) -------------------------------------
+#
+# Nunca se dispara un login real en la test suite: subprocess.run se
+# reemplaza siempre por un falso que no abre nada.
+
+
+def test_configurar_claude_sin_sesion_dispara_login_y_verifica(monkeypatch):
+    """Si no hay sesión, Jarvis lanza `claude` como subproceso (heredando
+    stdin/stdout/stderr, por eso no se pasa capture_output), espera a que
+    termine y recién ahí vuelve a chequear la sesión."""
+    from jarvis.__main__ import _configurar_claude
+
+    estado = {"logueado": False}
+    monkeypatch.setattr("jarvis.__main__._hay_sesion_claude", lambda: estado["logueado"])
+    llamadas = []
+
+    def login_falso(cmd, **kwargs):
+        llamadas.append(cmd)
+        estado["logueado"] = True  # simula que el usuario completó /login
+        return NS(returncode=0)
+
+    monkeypatch.setattr("jarvis.__main__.subprocess.run", login_falso)
+
+    assert _configurar_claude() == "suscripcion"
+    assert llamadas == [["claude"]]
+    assert os.environ["JARVIS_MOTOR"] == "suscripcion"
+
+
+def test_configurar_claude_ya_logueado_no_dispara_login(monkeypatch):
+    from jarvis.__main__ import _configurar_claude
+
+    monkeypatch.setattr("jarvis.__main__._hay_sesion_claude", lambda: True)
+
+    def login_que_no_debe_llamarse(*_a, **_kw):
+        pytest.fail("no debería intentar loguear si ya hay sesión")
+
+    monkeypatch.setattr("jarvis.__main__.subprocess.run", login_que_no_debe_llamarse)
+
+    assert _configurar_claude() == "suscripcion"
+
+
+def test_configurar_claude_login_no_deja_sesion_activa_falla(monkeypatch):
+    from jarvis.__main__ import _configurar_claude
+
+    monkeypatch.setattr("jarvis.__main__._hay_sesion_claude", lambda: False)
+    monkeypatch.setattr("jarvis.__main__.subprocess.run", lambda *_a, **_kw: NS(returncode=0))
+
+    with pytest.raises(RuntimeError, match="sesión activa"):
+        _configurar_claude()
+
+
+def test_configurar_claude_sin_cli_instalada_falla_con_mensaje_claro(monkeypatch):
+    from jarvis.__main__ import _configurar_claude
+
+    monkeypatch.setattr("jarvis.__main__._hay_sesion_claude", lambda: False)
+
+    def sin_binario(*_a, **_kw):
+        raise OSError("no such file")
+
+    monkeypatch.setattr("jarvis.__main__.subprocess.run", sin_binario)
+
+    with pytest.raises(RuntimeError, match="instalado"):
+        _configurar_claude()
+
+
+def test_configurar_codex_sin_sesion_dispara_login_y_verifica(monkeypatch):
+    """`codex login` es un subcomando directo (confirmado con
+    `codex --help`): se lanza igual heredando stdin/stdout/stderr."""
+    from jarvis.__main__ import _configurar_codex
+
+    estado = {"logueado": False}
+    monkeypatch.setattr("jarvis.__main__._hay_sesion_codex", lambda: estado["logueado"])
+    llamadas = []
+
+    def login_falso(cmd, **kwargs):
+        llamadas.append(cmd)
+        estado["logueado"] = True
+        return NS(returncode=0)
+
+    monkeypatch.setattr("jarvis.__main__.subprocess.run", login_falso)
+
+    assert _configurar_codex() == "codex"
+    assert llamadas == [["codex", "login"]]
+    assert os.environ["JARVIS_MOTOR"] == "codex"
+
+
+def test_configurar_codex_ya_logueado_no_dispara_login(monkeypatch):
+    from jarvis.__main__ import _configurar_codex
+
+    monkeypatch.setattr("jarvis.__main__._hay_sesion_codex", lambda: True)
+
+    def login_que_no_debe_llamarse(*_a, **_kw):
+        pytest.fail("no debería intentar loguear si ya hay sesión")
+
+    monkeypatch.setattr("jarvis.__main__.subprocess.run", login_que_no_debe_llamarse)
+
+    assert _configurar_codex() == "codex"
+
+
+def test_configurar_codex_login_no_deja_sesion_activa_falla(monkeypatch):
+    from jarvis.__main__ import _configurar_codex
+
+    monkeypatch.setattr("jarvis.__main__._hay_sesion_codex", lambda: False)
+    monkeypatch.setattr("jarvis.__main__.subprocess.run", lambda *_a, **_kw: NS(returncode=1))
+
+    with pytest.raises(RuntimeError, match="sesión activa"):
+        _configurar_codex()
+
+
+def test_configurar_codex_sin_cli_instalada_falla_con_mensaje_claro(monkeypatch):
+    from jarvis.__main__ import _configurar_codex
+
     monkeypatch.setattr("jarvis.__main__._hay_sesion_codex", lambda: False)
 
-    with pytest.raises(RuntimeError, match="sesión en Codex"):
-        _menu_conexion_ia()
+    def sin_binario(*_a, **_kw):
+        raise OSError("no such file")
+
+    monkeypatch.setattr("jarvis.__main__.subprocess.run", sin_binario)
+
+    with pytest.raises(RuntimeError, match="instalado"):
+        _configurar_codex()
 
 
 def test_menu_conexion_opcion_local_lista_y_persiste_modelo(monkeypatch, tmp_path):
     from jarvis.__main__ import _menu_conexion_ia
 
-    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("jarvis.config._RUTA_ENV_POR_DEFECTO", tmp_path / ".env")
     monkeypatch.setattr("jarvis.__main__.listar_modelos_ollama", lambda: ["qwen3:8b", "qwen3-vl:4b"])
     entradas = iter(["1", "1"])  # 1) modelo local -> 1) qwen3:8b
     monkeypatch.setattr("builtins.input", lambda _="": next(entradas))
@@ -506,6 +633,171 @@ def test_menu_conexion_opcion_invalida_falla(monkeypatch):
 
     with pytest.raises(RuntimeError, match="No encuentro"):
         _menu_conexion_ia()
+
+
+# --- menú en ventana (sin terminal, ej. ícono de escritorio) -----------------
+#
+# Nunca se abre una ventana real en la suite: se mockea
+# ``ventana_macos.ejecutar_ventana_menu`` para que corra ``trabajo`` directo,
+# igual que ya se hace con ``ejecutar_con_ventana_flotante`` para el HUD.
+
+
+def test_crear_cerebro_sin_tty_y_sin_ventana_falla_con_mensaje_claro(monkeypatch, tmp_path):
+    from jarvis.__main__ import _crear_cerebro
+
+    monkeypatch.setattr("sys.stdin.isatty", lambda: False)
+    monkeypatch.setattr("jarvis.__main__._hud_ventana_disponible", lambda: False)
+
+    with pytest.raises(RuntimeError, match="terminal interactiva"):
+        _crear_cerebro(Config(carpeta_datos=tmp_path))
+
+
+def test_crear_cerebro_sin_tty_y_con_ventana_usa_el_menu_de_ventana(monkeypatch, tmp_path):
+    from jarvis.__main__ import _crear_cerebro
+
+    monkeypatch.setattr("sys.stdin.isatty", lambda: False)
+    monkeypatch.setattr("sys.platform", "darwin")
+    monkeypatch.setattr("jarvis.__main__._hud_ventana_disponible", lambda: True)
+    monkeypatch.setattr("jarvis.__main__._menu_conexion_ia_ventana", lambda: "api")
+    monkeypatch.setenv("JARVIS_PROVEEDOR", "ollama")
+    monkeypatch.setenv("JARVIS_MODELO", "qwen3:8b")
+
+    cerebro = _crear_cerebro(Config(carpeta_datos=tmp_path))
+
+    from jarvis.proveedores import AdaptadorOllama
+    assert isinstance(cerebro.proveedor, AdaptadorOllama)
+
+
+class _ServidorMenuFalso:
+    """Imita ``ServidorMenu`` sin levantar ningún servidor HTTP real: una
+    cola de acciones que el test alimenta a mano, y un registro de los
+    estados que se le fueron pidiendo mostrar."""
+
+    def __init__(self, acciones):
+        self.url = "http://127.0.0.1:0/"
+        self._acciones = iter(acciones)
+        self.estados: list[dict] = []
+        self.cerrado = False
+
+    def actualizar(self, **cambios):
+        self.estados.append(cambios)
+
+    def esperar_accion(self, timeout=None):
+        return next(self._acciones, None)
+
+    def cerrar(self):
+        self.cerrado = True
+
+
+def _correr_ventana_falsa(monkeypatch, servidor_falso):
+    monkeypatch.setattr("jarvis.hud.servidor_menu.ServidorMenu", lambda: servidor_falso)
+
+    def ejecutar_ventana_menu_falso(_url, trabajo):
+        trabajo()
+
+    monkeypatch.setattr("jarvis.hud.ventana_macos.ejecutar_ventana_menu", ejecutar_ventana_menu_falso)
+
+
+def test_menu_ventana_camino_local_elige_y_persiste_modelo(monkeypatch, tmp_path):
+    from jarvis.__main__ import _menu_conexion_ia_ventana
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("jarvis.__main__.listar_modelos_ollama", lambda: ["qwen3:8b", "qwen3-vl:4b"])
+    servidor = _ServidorMenuFalso([{"tipo": "local"}, {"tipo": "modelo", "modelo": "qwen3:8b"}])
+    _correr_ventana_falsa(monkeypatch, servidor)
+
+    assert _menu_conexion_ia_ventana() == "api"
+    assert os.environ["JARVIS_PROVEEDOR"] == "ollama"
+    assert os.environ["JARVIS_MODELO"] == "qwen3:8b"
+    assert servidor.cerrado
+    assert {"paso": "hecho", "mensaje": "Usando el modelo local qwen3:8b."} in servidor.estados
+
+
+def test_menu_ventana_camino_local_sin_modelos_termina_en_error(monkeypatch, tmp_path):
+    from jarvis.__main__ import _menu_conexion_ia_ventana
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("jarvis.__main__.listar_modelos_ollama", lambda: [])
+    monkeypatch.setattr("jarvis.__main__.time.sleep", lambda _s: None)
+    servidor = _ServidorMenuFalso([{"tipo": "local"}])
+    _correr_ventana_falsa(monkeypatch, servidor)
+
+    with pytest.raises(RuntimeError, match="modelos instalados"):
+        _menu_conexion_ia_ventana()
+    assert servidor.cerrado
+
+
+def test_menu_ventana_camino_proveedor_ya_logueado_no_abre_terminal(monkeypatch, tmp_path):
+    from jarvis.__main__ import _menu_conexion_ia_ventana
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("jarvis.__main__._hay_sesion_claude", lambda: True)
+
+    def terminal_que_no_debe_abrirse(*_a, **_kw):
+        pytest.fail("no debería abrir una Terminal si ya hay sesión")
+
+    monkeypatch.setattr("jarvis.__main__._abrir_terminal_con_comando", terminal_que_no_debe_abrirse)
+    servidor = _ServidorMenuFalso([{"tipo": "proveedor"}, {"tipo": "anthropic"}])
+    _correr_ventana_falsa(monkeypatch, servidor)
+
+    assert _menu_conexion_ia_ventana() == "suscripcion"
+    assert os.environ["JARVIS_MOTOR"] == "suscripcion"
+
+
+def test_menu_ventana_camino_proveedor_sin_sesion_abre_terminal_y_pollea(monkeypatch, tmp_path):
+    from jarvis.__main__ import _menu_conexion_ia_ventana
+
+    monkeypatch.chdir(tmp_path)
+    estado = {"logueado": False}
+    monkeypatch.setattr("jarvis.__main__._hay_sesion_codex", lambda: estado["logueado"])
+    llamadas = []
+
+    def abrir_terminal_falso(comando):
+        llamadas.append(comando)
+        estado["logueado"] = True  # simula que el usuario terminó el login en la Terminal
+
+    monkeypatch.setattr("jarvis.__main__._abrir_terminal_con_comando", abrir_terminal_falso)
+    monkeypatch.setattr("jarvis.__main__.time.sleep", lambda _s: None)
+    servidor = _ServidorMenuFalso([{"tipo": "proveedor"}, {"tipo": "openai"}])
+    _correr_ventana_falsa(monkeypatch, servidor)
+
+    assert _menu_conexion_ia_ventana() == "codex"
+    assert llamadas == [["codex", "login"]]
+    assert os.environ["JARVIS_MOTOR"] == "codex"
+
+
+def test_menu_ventana_camino_proveedor_login_nunca_detectado_agota_tiempo(monkeypatch, tmp_path):
+    from jarvis.__main__ import _menu_conexion_ia_ventana
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("jarvis.__main__._hay_sesion_claude", lambda: False)
+    monkeypatch.setattr("jarvis.__main__._abrir_terminal_con_comando", lambda _comando: None)
+    monkeypatch.setattr("jarvis.__main__.TIMEOUT_LOGIN_VENTANA_SEGUNDOS", 0)
+    monkeypatch.setattr("jarvis.__main__.time.sleep", lambda _s: None)
+    servidor = _ServidorMenuFalso([{"tipo": "proveedor"}, {"tipo": "anthropic"}])
+    _correr_ventana_falsa(monkeypatch, servidor)
+
+    with pytest.raises(RuntimeError, match="No detecté una sesión activa"):
+        _menu_conexion_ia_ventana()
+    assert servidor.cerrado
+
+
+def test_abrir_terminal_con_comando_usa_osascript_con_terminal_app(monkeypatch):
+    from jarvis.__main__ import _abrir_terminal_con_comando
+
+    llamadas = []
+    monkeypatch.setattr(
+        "jarvis.__main__.subprocess.run",
+        lambda cmd, **kwargs: llamadas.append((cmd, kwargs)) or NS(returncode=0),
+    )
+
+    _abrir_terminal_con_comando(["codex", "login"])
+
+    (cmd, kwargs), = llamadas
+    assert cmd[0] == "osascript"
+    assert "Terminal" in cmd[-1]
+    assert "codex login" in cmd[-1]
+    assert kwargs.get("check") is True
 
 
 def test_instancia_unica_primera_vez_toma_el_lock(tmp_path):

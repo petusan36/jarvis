@@ -61,32 +61,48 @@ Si al instalar ves `ERROR: Could not find a version that satisfies the
 requirement kokoro`, tu `.venv` quedó creado con una versión de Python
 equivocada: borralo (`rm -rf .venv`) y repetí desde `python3.12 -m venv .venv`.
 
-## Conectar con Claude: clave de API o suscripción
+## Conectar con un modelo de IA: el menú de cada arranque
 
 ```bash
 python -m jarvis
 ```
 
-Al primer arranque, Jarvis valida solo cómo conectar con Claude:
+En **todo** arranque normal (sin `--instalar-app`) Jarvis te pregunta, con un
+menú de dos niveles, cómo conectar con un modelo de IA — no solo la primera
+vez: así podés cambiar de proveedor sin pasar ningún flag.
 
-- Si encuentra `ANTHROPIC_API_KEY` en tu entorno o `.env`, usa la API.
-- Si detecta que ya iniciaste sesión en Claude Code (`claude` → `/login`), usa
-  tu suscripción Pro/Max.
-- Si no encuentra ninguna de las dos, te pregunta ahí mismo:
-  1. **Clave de API**: la pegas y queda activa solo para esta ejecución, en
-     memoria — no se guarda en ningún archivo. Te la va a volver a pedir la
-     próxima vez. Si no quieres repetirlo, ponla vos mismo en `.env`.
-  2. **Suscripción Pro/Max**: el soporte ya está instalado (no es un extra
-     aparte); solo falta que inicies sesión, algo que pip no puede hacer por
-     vos:
-     ```bash
-     npm install -g @anthropic-ai/claude-code   # o el instalador de https://claude.com/claude-code
-     claude                                      # dentro, escribe /login e inicia sesión con tu cuenta
-     ```
-     Hazlo y vuelve a ejecutar `python -m jarvis`.
+1. **Nivel 1**: ¿modelo local o proveedor en la nube?
+2. **Nivel 2** (solo si elegís proveedor): ¿OpenAI (Codex) o Anthropic (Claude)?
 
-Una vez configurado cualquiera de los dos, Jarvis lo detecta solo en cada
-arranque (o fuérzalo con `JARVIS_MOTOR=api` / `JARVIS_MOTOR=suscripcion`).
+- **Local (Ollama)**: lista los modelos que ya tengas instalados y elegís uno.
+- **OpenAI / Codex**: usa la sesión de Codex CLI. Si todavía no iniciaste
+  sesión, Jarvis mismo ejecuta `codex login` (hereda la terminal para que
+  completes el inicio de sesión en el navegador), espera a que termine y
+  recién ahí arranca.
+- **Anthropic / Claude**: usa tu suscripción Pro/Max a través de Claude Code.
+  Si no hay sesión, Jarvis abre `claude` (la propia CLI interactiva — Claude
+  Code no tiene, al momento de escribir esto, un subcomando de login no
+  interactivo): dentro, escribe `/login`, completa el inicio de sesión y
+  salí con `/exit` o Ctrl+D para volver. Jarvis espera a que ese proceso
+  termine y verifica que la sesión quedó activa antes de arrancar.
+
+Ninguna opción pide ni guarda una clave de API: solo se persiste en `.env` la
+elección en sí (qué motor usar, qué modelo local), nunca un secreto. La
+clave directa de Anthropic (`ANTHROPIC_API_KEY`) sigue funcionando si la
+ponés vos mismo en `.env` y elegís Anthropic en el menú (o la sesión de
+Claude Code), pero el menú ya no la pide ni la pega por vos.
+
+El menú se muestra por terminal (`input()`/`print()`) si hay una terminal
+interactiva de verdad. Si no (ej. doble clic en el ícono de escritorio, sin
+terminal) pero hay entorno gráfico disponible (hoy: macOS con PyObjC), se
+muestra en cambio una ventana nativa con el mismo menú de 2 niveles: elegir
+modelo local o proveedor, y si hace falta loguearse, se abre una Terminal.app
+visible con `claude`/`codex login` mientras la ventana espera y pollea hasta
+detectar la sesión activa. Sin terminal ni entorno gráfico, no hay forma de
+mostrar el menú y Jarvis falla con un mensaje claro.
+
+`--reconfigurar-ia` ya no tiene efecto propio (el menú corre siempre); se
+conserva solo por compatibilidad con scripts o accesos existentes.
 
 Ten en cuenta:
 
@@ -276,11 +292,12 @@ con un mensaje claro pidiendo que lo corras primero.
 
 Importante:
 
-- **La primera vez, usa una terminal.** Sin ventana, el menú de activación
-  (clave de API o suscripción) no puede mostrarse. Corre `python -m jarvis`
-  desde la terminal una vez (o el binario del bundle directamente, también
-  desde una terminal), configurá cómo conectar con Claude, y de ahí en más
-  el ícono ya funciona solo.
+- **El ícono de escritorio en macOS sí puede elegir o cambiar de proveedor**,
+  mostrando el menú en una ventana nativa en vez de una terminal (ver más
+  arriba) — requiere PyObjC instalado, igual que la ventana flotante del HUD.
+  En Windows y Linux el ícono todavía no tiene ventana propia para esto: ahí
+  seguí usando el binario del bundle (o `python -m jarvis`) desde una
+  terminal para la primera conexión o para cambiar de proveedor.
 - **macOS puede avisar "desarrollador no identificado"** la primera vez que
   abras el ícono (no está firmado ni notarizado): clic derecho → Abrir, o
   `xattr -d com.apple.quarantine ~/Applications/Jarvis.app`.
@@ -346,7 +363,7 @@ Todo se ajusta en el archivo `.env` (mira `.env.example`):
 | Variable | Por defecto | Para qué sirve |
 |---|---|---|
 | `ANTHROPIC_API_KEY` | — | Tu clave de Claude (no hace falta con la suscripción) |
-| `JARVIS_MOTOR` | `auto` | `api`, `suscripcion` o `auto` (API si hay clave, si no la suscripción) |
+| `JARVIS_MOTOR` | `auto` | `api`, `suscripcion` o `codex`. El menú de cada arranque lo elige y lo guarda acá; no hace falta tocarlo a mano. |
 | `JARVIS_NOMBRE_USUARIO` | `señor` | Cómo te llama Jarvis |
 | `JARVIS_MODELO` | `claude-opus-5-5` | Modelo de Claude |
 | `JARVIS_ESFUERZO` | `low` | `low` responde más rápido; `medium`/`high` piensa más |

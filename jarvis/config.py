@@ -6,27 +6,54 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
+# Mismo directorio que ``Config.carpeta_datos`` (no se puede importar la
+# dataclass todavía: su propio default se resuelve leyendo este .env). NO
+# usar una ruta relativa como ".env": depende del directorio de trabajo, que
+# para un proceso arrancado por doble clic en el ícono de escritorio NO es
+# el repo (en macOS suele ser "/", de solo lectura) — eso rompía el guardado
+# con "[Errno 30] Read-only file system: '.env'".
+_RUTA_ENV_POR_DEFECTO = Path.home() / ".jarvis" / ".env"
 
-def _cargar_dotenv(ruta: Path = Path(".env")) -> None:
-    """Carga un .env sencillo (CLAVE=valor) sin pisar variables ya definidas."""
-    if not ruta.is_file():
-        return
-    for linea in ruta.read_text(encoding="utf-8").splitlines():
-        linea = linea.strip()
-        if not linea or linea.startswith("#") or "=" not in linea:
+
+def _cargar_dotenv(ruta: Path | None = None) -> None:
+    """Carga un .env sencillo (CLAVE=valor) sin pisar variables ya definidas.
+
+    Si no se pasa ``ruta`` explícita, mira dos lugares, en orden (el primero
+    que defina una clave gana, por ``setdefault``): el ``.env`` del propio
+    repo (ruta relativa, para quien corre `python -m jarvis` desde una
+    terminal con el repo como directorio de trabajo — convención de
+    desarrollo, ver README) y ``~/.jarvis/.env`` (donde el menú de conexión
+    guarda la elección — el único lugar que funciona también cuando Jarvis
+    arranca desde el ícono de escritorio, sin ese directorio de trabajo)."""
+    rutas = [ruta] if ruta is not None else [Path(".env"), _RUTA_ENV_POR_DEFECTO]
+    for candidata in rutas:
+        if not candidata.is_file():
             continue
-        clave, valor = linea.split("=", 1)
-        os.environ.setdefault(clave.strip(), valor.strip().strip('"').strip("'"))
+        for linea in candidata.read_text(encoding="utf-8").splitlines():
+            linea = linea.strip()
+            if not linea or linea.startswith("#") or "=" not in linea:
+                continue
+            clave, valor = linea.split("=", 1)
+            os.environ.setdefault(clave.strip(), valor.strip().strip('"').strip("'"))
 
 
-def guardar_en_env(clave: str, valor: str, ruta: Path = Path(".env")) -> None:
+def guardar_en_env(clave: str, valor: str, ruta: Path | None = None) -> None:
     """Escribe o reemplaza CLAVE=valor en .env, conservando el resto del
     archivo y con permisos 0600 (solo el usuario puede leerlo).
 
     Se usa desde el menú de configuración de IA (``jarvis.__main__``) para
     persistir el proveedor elegido, el modelo y la clave de API, de modo que
     no haya que repetir la elección en cada arranque. No imprime ni registra
-    el valor guardado."""
+    el valor guardado.
+
+    Por defecto (``ruta=None``) escribe siempre en ``~/.jarvis/.env``, nunca
+    en el directorio de trabajo: se resuelve en el cuerpo de la función (no
+    como valor por defecto del parámetro) para que un test pueda
+    monkeypatchear ``_RUTA_ENV_POR_DEFECTO`` y que surta efecto — un default
+    de parámetro queda fijo en el momento en que se define la función."""
+    if ruta is None:
+        ruta = _RUTA_ENV_POR_DEFECTO
+    ruta.parent.mkdir(parents=True, exist_ok=True)
     lineas = ruta.read_text(encoding="utf-8").splitlines() if ruta.is_file() else []
     nueva = f"{clave}={valor}"
     for i, linea in enumerate(lineas):

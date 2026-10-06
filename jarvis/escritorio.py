@@ -18,6 +18,11 @@ Si el bundle todavía no se construyó (no existe ``dist/Jarvis.app`` ni
 ``dist/jarvis`` junto al repo), se lanza ``RuntimeError`` con instrucciones
 claras para correr primero ``scripts/build_app.sh``.
 
+El doble clic arranca sin terminal, así que el menú de conexión con IA cae
+a la ventana nativa (ver ``jarvis.__main__._menu_conexion_ia_ventana``) en
+vez de a ``input()``/``print()`` — eso no depende de cómo se instaló, solo
+de si hay una tty real o no.
+
 No incluye: ícono personalizado (arte), firma/notarización de macOS, ni
 desinstalador. Sin sesión ni clave configuradas todavía, la primera vez hay
 que correr el bundle (o ``python -m jarvis``) desde una terminal (ver README).
