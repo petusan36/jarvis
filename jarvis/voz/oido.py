@@ -2,8 +2,12 @@
 
 Por defecto escucha de forma continua: detecta cuándo empiezas a hablar por el
 volumen (comparado con el ruido de fondo, que mide sola) y corta tras un breve
-silencio. Mientras Jarvis habla el micrófono está cerrado, así no se escucha a
-sí mismo. Con `pulsar=True` vuelve al modo antiguo de pulsar Enter.
+silencio. Mientras Jarvis habla, el micrófono principal está cerrado (así no
+se escucha a sí mismo) — pero si el motor de voz lo permite, un "vigía" aparte
+(`vigilar_interrupcion`) escucha en paralelo solo la palabra de corte, sin eco
+cancelado: con parlantes puede, en teoría, confundir su propia voz, aunque es
+poco probable salvo que la respuesta contenga la palabra "Jarvis". Con
+`pulsar=True` vuelve al modo antiguo de pulsar Enter.
 """
 
 from __future__ import annotations
@@ -11,6 +15,7 @@ from __future__ import annotations
 import collections
 import queue
 import re
+import threading
 import time
 
 from ..hud import HudNulo
@@ -106,6 +111,54 @@ class Oido:
             if texto:
                 return texto
             # Ruido, una alucinación de Whisper o no iba dirigido a Jarvis: seguir escuchando.
+
+    def vigilar_interrupcion(self, palabra: str, detener_vigia: threading.Event,
+                             al_detectar) -> threading.Event:
+        """Escucha en paralelo mientras Jarvis habla. Si oye `palabra`, llama a
+        `al_detectar()` de inmediato (desde este mismo hilo, para no esperar a
+        que el principal quede libre — está bloqueado en habla.decir()) y
+        activa el evento que devuelve. Deja de escuchar en cuanto
+        `detener_vigia` se active (Jarvis terminó solo, sin que lo corten) —
+        así no quedan dos micrófonos abiertos a la vez."""
+        interrumpido = threading.Event()
+
+        def _vigilar() -> None:
+            import numpy as np
+            import sounddevice as sd
+
+            bloques: queue.Queue = queue.Queue()
+
+            def al_recibir(datos, _frames, _tiempo, _estado):
+                bloques.put(datos[:, 0].copy())
+
+            detector = DetectorVoz(sensibilidad=self.sensibilidad)
+            frase: list = []
+            try:
+                with sd.InputStream(samplerate=FRECUENCIA, channels=1, dtype="float32",
+                                    blocksize=BLOQUE, callback=al_recibir):
+                    while not detener_vigia.is_set():
+                        try:
+                            bloque = bloques.get(timeout=0.2)
+                        except queue.Empty:
+                            continue
+                        rms = float(np.sqrt(np.mean(bloque ** 2)))
+                        evento = detector.procesar(rms)
+                        if not (detector.hablando or evento == "fin"):
+                            continue
+                        frase.append(bloque)
+                        if evento != "fin":
+                            continue
+                        texto = self._transcribir(np.concatenate(frase))
+                        frase = []
+                        if filtrar_palabra_activacion(texto, palabra):
+                            al_detectar()
+                            interrumpido.set()
+                            return
+            except Exception:
+                pass  # el vigía es un extra: si falla, Jarvis sigue hablando normal
+
+        threading.Thread(target=_vigilar, daemon=True).start()
+        return interrumpido
 
     def _grabar_continuo(self):
         """Graba la siguiente frase: empieza cuando oye voz y corta tras un silencio."""

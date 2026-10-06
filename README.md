@@ -110,11 +110,17 @@ Sin ningún flag arranca todo junto: te escucha, te responde hablando y abre en
 el navegador la animación estilo Jarvis ([ver más abajo](#animación-hud)).
 
 Jarvis te escucha siempre: habla cuando quieras y, en cuanto hagas una pausa de
-menos de un segundo, entiende que has terminado y responde. Mientras él habla
-el micrófono se apaga, así que no se escucha a sí mismo. Di **salir** o pulsa
-**Ctrl+C** para terminar. La primera vez se descarga el modelo de Whisper
-(`small`, unos 500 MB).
+menos de un segundo, entiende que has terminado y responde. Di **salir** o
+pulsa **Ctrl+C** para terminar. La primera vez se descarga el modelo de
+Whisper (`small`, unos 500 MB).
 
+- **Interrumpirlo mientras habla**: decí **"Jarvis"** y corta la respuesta al
+  instante (solo con los motores Kokoro, Piper o ElevenLabs — `say` de macOS
+  y pyttsx3 no se pueden cortar a mitad de frase). Sin cancelación de eco: con
+  parlantes el micrófono capta su propia voz mientras habla, así que en
+  teoría podría confundirse con algo que él mismo dijo, aunque es poco común
+  porque sus respuestas casi nunca se nombran a sí mismas. Con auriculares no
+  pasa.
 - **Sin la animación**: `python -m jarvis --sin-hud` — sigue escuchando y
   hablando, solo que no abre el navegador.
 - **Sin voz, solo hablando por texto**: `python -m jarvis --silencio` — te
@@ -202,11 +208,53 @@ python -m jarvis --texto --hud    # modo texto, con HUD
 | En espera | anillos azules girando despacio, el núcleo respira |
 | Escuchando | barras alrededor del anillo que vibran con el volumen del micrófono |
 | Procesando | los anillos aceleran, se vuelven dorados y aparecen órbitas de escaneo |
-| Respondiendo | el núcleo late como si hablara y se muestra la respuesta |
+| Respondiendo | el núcleo late como si hablara |
 
-No necesita instalar nada: Jarvis sirve la página en `http://127.0.0.1:8765`
-(cámbialo con `JARVIS_PUERTO_HUD`). Pulsa F11 en el navegador para verla a
-pantalla completa.
+No necesita instalar nada extra: Jarvis sirve la página en
+`http://127.0.0.1:8765` (cámbialo con `JARVIS_PUERTO_HUD`).
+
+**En macOS**, se abre sola como una ventana flotante nativa: sin marco, sin
+botones, fondo transparente (se ve el escritorio detrás) y sin texto —
+solo los anillos, como un widget que flota sobre todo lo demás. Chica,
+proporcional al tamaño de tu pantalla, y siempre arriba a la izquierda. Se
+puede arrastrar agarrando cualquier parte (no tiene barra de título). No
+aparece en el Dock ni en el selector de apps — para cerrarla, cerrá Jarvis
+(decile "cerrate").
+
+En Windows y Linux, por ahora sigue abriéndose como ventana de Chrome en modo
+app (sin pestañas ni barra de direcciones, pero con el marco normal) o, sin
+Chrome instalado, como pestaña del navegador.
+
+## App de escritorio
+
+```bash
+python -m jarvis --instalar-app
+```
+
+Crea un ícono de doble clic que abre Jarvis en modo completo (voz + HUD), sin
+ventana de terminal: la salida queda en `~/.jarvis/jarvis.log` en vez de en
+pantalla.
+
+| Sistema | Dónde queda |
+|---|---|
+| macOS | `~/Applications/Jarvis.app` (Finder, Launchpad, Spotlight) |
+| Windows | Menú Inicio → Jarvis |
+| Linux | menú de aplicaciones del escritorio (`~/.local/share/applications`) |
+
+Importante:
+
+- **La primera vez, usa una terminal.** Sin ventana, el menú de activación
+  (clave de API o suscripción) no puede mostrarse. Corre `python -m jarvis`
+  desde la terminal una vez, configurá cómo conectar con Claude, y de ahí en
+  más el ícono ya funciona solo.
+- **macOS puede avisar "desarrollador no identificado"** la primera vez que
+  abras el ícono (no está firmado ni notarizado): clic derecho → Abrir, o
+  `xattr -d com.apple.quarantine ~/Applications/Jarvis.app`.
+- No hay ícono con arte personalizado ni desinstalador todavía — borrar el
+  ícono a mano (`rm -rf ~/Applications/Jarvis.app` en macOS, el `.bat` o el
+  `.desktop` en Windows/Linux) alcanza para quitarlo.
+- Este paso prepara el terreno para que la animación HUD, más adelante, flote
+  directamente en el escritorio en vez de abrirse en una pestaña del navegador.
 
 ## Carpetas y aplicaciones (macOS)
 
@@ -214,6 +262,9 @@ Jarvis puede manejar tu Mac por voz o texto:
 
 - **Carpetas y archivos**: "¿qué hay en Descargas?", "busca la factura de enero",
   "abre la carpeta Documentos" o "abre el informe.pdf".
+- **Leer PDFs**: "leé el informe.pdf de Documentos y resumímelo" — extrae el
+  texto para que Jarvis lo lea, resuma o responda preguntas sobre él (no
+  funciona con PDFs escaneados sin OCR, que no tienen texto real adentro).
 - **Aplicaciones**: "abre Spotify", "¿qué programas tengo abiertos?", "cierra Safari".
 
 Por seguridad:
@@ -221,11 +272,27 @@ Por seguridad:
 - Solo ve lo que hay dentro de tu carpeta personal (`~`), no el resto del disco.
 - No puede borrar ni mover archivos, ni abrir scripts ejecutables.
 - Antes de cerrar una aplicación te pregunta y espera a que digas que sí en tu
-  siguiente mensaje (podrías tener algo sin guardar).
+  siguiente mensaje (podrías tener algo sin guardar). Para cerrar Jarvis mismo
+  no hace falta esa confirmación: decile "cerrate" o "salí" y termina.
 
 La primera vez que liste o cierre aplicaciones, macOS te pedirá permiso para
 que la Terminal controle "System Events" o esa aplicación: acéptalo (se puede
 cambiar en Ajustes del Sistema → Privacidad y seguridad → Automatización).
+
+## Música (YouTube)
+
+"Poné Bohemian Rhapsody" o "buscá música de Serrat" abre YouTube con esa
+búsqueda. Para que reproduzca directo el primer resultado sin que tengas que
+clickear nada, consigue una clave de **YouTube Data API v3** (gratis, con
+cuota) en <https://console.cloud.google.com/apis/library/youtube.googleapis.com>
+y ponla en `YOUTUBE_API_KEY`. Sin ella, igual funciona: abre los resultados y
+elegís vos.
+
+## Navegar por internet
+
+Para lo que no sea específicamente música en YouTube: "abrí Spotify" o
+"buscá las noticias de hoy" abren el navegador — una URL directa si la das,
+o una búsqueda en Google si no.
 
 ## Configuración
 
@@ -250,6 +317,7 @@ Todo se ajusta en el archivo `.env` (mira `.env.example`):
 | `ELEVENLABS_API_KEY` | — | Activa el motor ElevenLabs (de pago) |
 | `JARVIS_ELEVENLABS_VOZ` | `JBFqnCBsd6RMkjVDRZzb` (George) | Id de voz de <https://elevenlabs.io/app/voice-library> |
 | `JARVIS_ELEVENLABS_MODELO` | `eleven_multilingual_v2` | Modelo de ElevenLabs |
+| `YOUTUBE_API_KEY` | — | Reproduce directo el primer resultado al pedir música; sin ella, abre los resultados |
 
 ## Estructura
 
@@ -259,9 +327,13 @@ jarvis/
 ├── cerebro.py       conversación con Claude (API) y ejecución de herramientas
 ├── cerebro_suscripcion.py  lo mismo usando tu suscripción (Claude Agent SDK)
 ├── herramientas.py  herramientas que Claude puede usar
-├── sistema.py       herramientas de carpetas y aplicaciones (macOS)
+├── sistema.py       herramientas de carpetas, aplicaciones y PDFs (macOS)
+├── musica.py        buscar y reproducir música en YouTube
+├── web.py           abrir páginas web / buscar en Google
 ├── config.py        configuración desde .env
+├── escritorio.py    ícono de escritorio (--instalar-app)
 ├── hud/             animación estilo Jarvis (servidor local + hud.html)
+│   └── ventana_macos.py  ventana flotante nativa sin marco (macOS, PyObjC)
 └── voz/
     ├── oido.py      micrófono + Whisper (faster-whisper)
     └── habla.py     síntesis de voz (elevenlabs, kokoro, piper, macos, pyttsx3)
