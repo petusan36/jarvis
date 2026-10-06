@@ -2,11 +2,16 @@
 
 Abre `python -m jarvis` en modo completo (voz + HUD) sin ventana de terminal:
 la salida se redirige a un archivo de log, porque el usuario interactúa por
-voz y por el HUD, no leyendo la consola.
+voz y por el HUD, no leyendo la consola. Esto sigue teniendo sentido con el
+menú de conexión con IA en ventana (ver ``jarvis.__main__._menu_conexion_ia_ventana``):
+redirigir stdout/stderr a un log no afecta la conexión con el WindowServer,
+así que el proceso puede igual abrir una ventana nativa real y recibir
+clicks con normalidad — lo único que no tiene es una terminal para
+input()/print(), que es justo por lo que, sin tty, el menú cae a esa
+ventana en vez de a la consola.
 
 No incluye: ícono personalizado (arte), firma/notarización de macOS, ni
-desinstalador. Sin sesión ni clave configuradas todavía, la primera vez hay
-que correr `python -m jarvis` desde una terminal (ver README).
+desinstalador.
 """
 
 from __future__ import annotations

@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<title>Jarvis — Conexión con IA</title>
+<style>
+  :root { --cian: #7fe7ff; --fondo: #0b1016; --tarjeta: #141c26; --borde: #24323f; }
+  html, body { margin: 0; height: 100%; background: var(--fondo); color: #e8f4f8;
+    font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif; }
+  body { display: flex; flex-direction: column; justify-content: center;
+    align-items: center; padding: 24px; box-sizing: border-box; }
+  h1 { font-size: 17px; font-weight: 600; margin: 0 0 18px; color: var(--cian); text-align: center; }
+  p.ayuda { font-size: 13px; color: #9fb4c2; text-align: center; margin: 0 0 20px; line-height: 1.4; }
+  .opciones { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; width: 100%; }
+  button { background: var(--tarjeta); border: 1px solid var(--borde); color: #e8f4f8;
+    border-radius: 10px; padding: 12px 18px; font-size: 14px; cursor: pointer; min-width: 140px; }
+  button:hover { border-color: var(--cian); color: var(--cian); }
+  button:disabled { opacity: 0.4; cursor: default; }
+  .lista-modelos { display: flex; flex-direction: column; gap: 8px; width: 100%; max-width: 360px;
+    max-height: 260px; overflow-y: auto; }
+  .lista-modelos button { width: 100%; text-align: left; }
+  .spinner { width: 26px; height: 26px; border: 3px solid var(--borde); border-top-color: var(--cian);
+    border-radius: 50%; animation: girar 1s linear infinite; margin: 0 auto 16px; }
+  @keyframes girar { to { transform: rotate(360deg); } }
+  .error { color: #ff8a8a; font-size: 13px; text-align: center; max-width: 380px; }
+</style>
+</head>
+<body>
+  <div id="app"><p class="ayuda">Cargando…</p></div>
+
+<script>
+async function elegir(accion) {
+  await fetch("/accion", { method: "POST", body: JSON.stringify(accion) });
+}
+
+function render(estado) {
+  const app = document.getElementById("app");
+  const paso = estado.paso || "inicio";
+
+  if (paso === "inicio") {
+    app.innerHTML = `
+      <h1>¿Cómo querés conectar con un modelo de IA?</h1>
+      <div class="opciones">
+        <button id="b-local">Modelo local (Ollama)</button>
+        <button id="b-proveedor">Proveedor en la nube</button>
+      </div>`;
+    document.getElementById("b-local").onclick = () => elegir({ tipo: "local" });
+    document.getElementById("b-proveedor").onclick = () => elegir({ tipo: "proveedor" });
+    return;
+  }
+
+  if (paso === "local") {
+    const modelos = estado.modelos || [];
+    const botones = modelos.map((m, i) =>
+      `<button data-modelo="${i}">${m}</button>`).join("");
+    app.innerHTML = `
+      <h1>Elegí un modelo local</h1>
+      <div class="lista-modelos">${botones}</div>`;
+    [...app.querySelectorAll("[data-modelo]")].forEach((boton, i) => {
+      boton.onclick = () => elegir({ tipo: "modelo", modelo: modelos[i] });
+    });
+    return;
+  }
+
+  if (paso === "proveedor") {
+    app.innerHTML = `
+      <h1>¿Qué proveedor en la nube?</h1>
+      <div class="opciones">
+        <button id="b-openai">OpenAI (Codex)</button>
+        <button id="b-anthropic">Anthropic (Claude)</button>
+      </div>`;
+    document.getElementById("b-openai").onclick = () => elegir({ tipo: "openai" });
+    document.getElementById("b-anthropic").onclick = () => elegir({ tipo: "anthropic" });
+    return;
+  }
+
+  if (paso === "esperando_login") {
+    app.innerHTML = `
+      <div class="spinner"></div>
+      <p class="ayuda">${estado.mensaje || "Esperando que termines de iniciar sesión…"}</p>`;
+    return;
+  }
+
+  if (paso === "hecho") {
+    app.innerHTML = `<p class="ayuda">${estado.mensaje || "Listo."}</p>`;
+    return;
+  }
+
+  if (paso === "error") {
+    app.innerHTML = `<p class="error">${estado.mensaje || "Algo salió mal."}</p>`;
+    return;
+  }
+
+  app.innerHTML = `<p class="ayuda">Cargando…</p>`;
+}
+
+async function pollear() {
+  try {
+    const resp = await fetch("/estado");
+    render(await resp.json());
+  } catch (_e) {
+    // la ventana se está cerrando: el servidor ya no responde, no pasa nada
+  }
+  setTimeout(pollear, 400);
+}
+
+pollear();
+</script>
+</body>
+</html>

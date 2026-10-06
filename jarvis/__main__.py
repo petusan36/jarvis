@@ -13,15 +13,28 @@ abierta: así podés cambiar de proveedor sin flags extra. Por eso
 --reconfigurar-ia quedó sin efecto propio (el menú ya corre siempre) — se
 conserva el flag solo para no romper scripts o accesos existentes que lo
 invoquen.
+
+Cómo se muestra ese menú depende solo de si hay una terminal interactiva
+real (``sys.stdin.isatty()``), nunca de --texto ni de ningún otro flag: si
+hay tty (ejecutaste `python -m jarvis` a mano, con o sin --texto), el menú
+es por input()/print() en esa misma terminal, como siempre. Si no hay tty
+(ej. doble clic en el ícono de --instalar-app, sin terminal real) pero hay
+entorno gráfico disponible (hoy: macOS con PyObjC), se abre en cambio una
+ventana nativa con el mismo menú de 2 niveles (ver
+``_menu_conexion_ia_ventana`` en este módulo y ``jarvis.hud.servidor_menu``/
+``jarvis.hud.ventana_macos``). Si no hay ni tty ni entorno gráfico, falla
+con un error claro: no hay forma de preguntar nada.
 """
 
 from __future__ import annotations
 
 import argparse
 import os
+import shlex
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 
 import anthropic
@@ -224,14 +237,24 @@ def _crear_cerebro(config: Config, forzar_menu: bool = False):
     ya está en el entorno (uso directo de la API, sin pasar por ningún
     menú — comportamiento previo a todo esto, sin cambios)."""
     herramientas = Herramientas(config.carpeta_datos, youtube_api_key=config.youtube_api_key)
-    if not sys.stdin.isatty():
+    if sys.stdin.isatty():
+        # Hay una terminal real (ej. corriste `python -m jarvis` a mano): el
+        # menú de siempre, por input()/print(). Esto no cambia aunque haya
+        # ventana gráfica disponible — si alguien corre Jarvis desde la
+        # terminal a propósito, se respeta eso y no se le tapa con una
+        # ventana encima.
+        motor = _menu_conexion_ia()
+    elif sys.platform == "darwin" and _hud_ventana_disponible():
+        # Sin terminal (ej. doble clic en el ícono de escritorio) pero con
+        # entorno gráfico disponible: se muestra una ventana nativa con el
+        # mismo menú de 2 niveles en vez de romper por falta de tty.
+        motor = _menu_conexion_ia_ventana()
+    else:
         raise RuntimeError(
-            "Necesito una terminal interactiva para preguntar cómo conectar con un "
-            "modelo de IA. Abrí una terminal y ejecutá python -m jarvis (el ícono de "
-            "escritorio no sirve para elegir o cambiar de proveedor: solo para arrancar "
-            "una vez que ya quedó configurado desde la terminal)."
+            "Necesito una terminal interactiva (o una ventana gráfica, solo "
+            "disponible hoy en macOS con PyObjC) para preguntar cómo conectar "
+            "con un modelo de IA. Abrí una terminal y ejecutá python -m jarvis."
         )
-    motor = _menu_conexion_ia()
     config = Config.desde_entorno()
     if motor in ("suscripcion", "suscripción"):
         from .cerebro_suscripcion import CerebroSuscripcion
@@ -354,14 +377,31 @@ def _configurar_local() -> str:
     except (ValueError, IndexError, EOFError, KeyboardInterrupt) as error:
         raise RuntimeError("No elegiste un modelo local válido.") from error
 
+    resultado = _guardar_eleccion_local(modelo)
+    print(f"(usando el modelo local {modelo}; elección guardada en .env)")
+    return resultado
+
+
+def _guardar_eleccion_local(modelo: str) -> str:
+    """Persiste la elección de modelo local, sin ningún print ni input: la
+    parte que comparten el menú de consola (``_configurar_local``) y el de
+    ventana (``_atender_menu_local_ventana``)."""
     guardar_en_env("JARVIS_PROVEEDOR", "ollama")
     guardar_en_env("JARVIS_MODELO", modelo)
     guardar_en_env("JARVIS_MOTOR", "api")
     os.environ["JARVIS_PROVEEDOR"] = "ollama"
     os.environ["JARVIS_MODELO"] = modelo
     os.environ["JARVIS_MOTOR"] = "api"
-    print(f"(usando el modelo local {modelo}; elección guardada en .env)")
     return "api"
+
+
+def _guardar_motor(motor: str) -> str:
+    """Persiste solo el motor elegido (suscripción Claude o Codex), sin
+    clave alguna: la parte que comparten ``_configurar_claude``/
+    ``_configurar_codex`` (consola) y ``_atender_login_ventana`` (ventana)."""
+    guardar_en_env("JARVIS_MOTOR", motor)
+    os.environ["JARVIS_MOTOR"] = motor
+    return motor
 
 
 def _configurar_claude() -> str:
@@ -399,10 +439,9 @@ def _configurar_claude() -> str:
                 "intentar: ejecuta python -m jarvis de nuevo y completá el inicio de "
                 "sesión dentro de `claude`."
             )
-    guardar_en_env("JARVIS_MOTOR", "suscripcion")
-    os.environ["JARVIS_MOTOR"] = "suscripcion"
+    resultado = _guardar_motor("suscripcion")
     print("(usando tu suscripción de Claude; elección guardada en .env)")
-    return "suscripcion"
+    return resultado
 
 
 def _configurar_codex() -> str:
@@ -436,10 +475,158 @@ def _configurar_codex() -> str:
                 "intentar: ejecuta python -m jarvis de nuevo y completá el inicio de "
                 "sesión."
             )
-    guardar_en_env("JARVIS_MOTOR", "codex")
-    os.environ["JARVIS_MOTOR"] = "codex"
+    resultado = _guardar_motor("codex")
     print("(usando tu sesión de Codex; elección guardada en .env)")
-    return "codex"
+    return resultado
+
+
+TIMEOUT_LOGIN_VENTANA_SEGUNDOS = 180  # cuánto esperar, pollendo, un login en la Terminal que se abrió
+ESPERA_ENTRE_POLLEOS_SEGUNDOS = 1.5
+
+
+def _hud_ventana_disponible() -> bool:
+    from .hud import ventana_macos
+    return ventana_macos.disponible()
+
+
+def _menu_conexion_ia_ventana() -> str:
+    """Equivalente a ``_menu_conexion_ia`` pero mostrando una ventana nativa
+    en vez de preguntar por la terminal: se usa cuando no hay tty (ej. el
+    ícono de escritorio) pero sí hay entorno gráfico (ver
+    ``_crear_cerebro``). La ventana corre en el hilo principal (lo exige
+    AppKit) mientras este hilo de trabajo atiende los clics y la lógica de
+    siempre (listar modelos, disparar login, verificar sesión) en un hilo
+    aparte — ver ``ventana_macos.ejecutar_ventana_menu``."""
+    from .hud import ventana_macos
+    from .hud.servidor_menu import ServidorMenu
+
+    servidor = ServidorMenu()
+    resultado: dict[str, str] = {}
+
+    def trabajo() -> None:
+        try:
+            resultado["motor"] = _atender_menu_ventana(servidor)
+        except Exception as error:  # noqa: BLE001 — se re-lanza abajo, ya fuera de la ventana
+            resultado["error"] = str(error)
+            servidor.actualizar(paso="error", mensaje=str(error))
+            time.sleep(2.5)  # deja el mensaje de error visible un instante antes de cerrar
+        finally:
+            servidor.cerrar()
+
+    ventana_macos.ejecutar_ventana_menu(servidor.url, trabajo)
+    if "error" in resultado:
+        raise RuntimeError(resultado["error"])
+    return resultado["motor"]
+
+
+def _atender_menu_ventana(servidor) -> str:
+    """Primer nivel del menú en ventana: local o proveedor en la nube."""
+    servidor.actualizar(paso="inicio")
+    accion = servidor.esperar_accion(timeout=TIMEOUT_LOGIN_VENTANA_SEGUNDOS)
+    if not accion or accion.get("tipo") not in ("local", "proveedor"):
+        raise RuntimeError("No se eligió cómo conectar con un modelo de IA (se agotó el tiempo de espera).")
+
+    if accion["tipo"] == "local":
+        return _atender_menu_local_ventana(servidor)
+    return _atender_menu_proveedor_ventana(servidor)
+
+
+def _atender_menu_local_ventana(servidor) -> str:
+    """Lista los modelos de Ollama en la ventana y espera a que elijan uno."""
+    try:
+        modelos = listar_modelos_ollama()
+    except OSError as error:
+        raise RuntimeError(
+            f"No consigo hablar con Ollama ({error}). ¿Está corriendo? Probá "
+            "`ollama serve`, o instalalo desde https://ollama.com."
+        ) from error
+    if not modelos:
+        raise RuntimeError(
+            "Ollama está corriendo pero no tiene modelos instalados. Probá `ollama pull qwen3:8b`."
+        )
+
+    servidor.actualizar(paso="local", modelos=modelos)
+    accion = servidor.esperar_accion(timeout=TIMEOUT_LOGIN_VENTANA_SEGUNDOS)
+    if not accion or accion.get("tipo") != "modelo" or accion.get("modelo") not in modelos:
+        raise RuntimeError("No elegiste un modelo local válido.")
+
+    resultado = _guardar_eleccion_local(accion["modelo"])
+    servidor.actualizar(paso="hecho", mensaje=f"Usando el modelo local {accion['modelo']}.")
+    return resultado
+
+
+def _atender_menu_proveedor_ventana(servidor) -> str:
+    """Segundo nivel del menú en ventana: OpenAI o Anthropic."""
+    servidor.actualizar(paso="proveedor")
+    accion = servidor.esperar_accion(timeout=TIMEOUT_LOGIN_VENTANA_SEGUNDOS)
+    if not accion or accion.get("tipo") not in ("openai", "anthropic"):
+        raise RuntimeError("No se eligió un proveedor en la nube (se agotó el tiempo de espera).")
+
+    if accion["tipo"] == "openai":
+        return _atender_login_ventana(
+            servidor, hay_sesion=_hay_sesion_codex, comando=["codex", "login"],
+            motor="codex", nombre="Codex",
+        )
+    return _atender_login_ventana(
+        servidor, hay_sesion=_hay_sesion_claude, comando=["claude"],
+        motor="suscripcion", nombre="Claude Code",
+    )
+
+
+def _atender_login_ventana(servidor, *, hay_sesion, comando: list[str], motor: str, nombre: str) -> str:
+    """Dispara (si hace falta) el login de un proveedor en la nube desde la
+    ventana. A diferencia del menú de consola (``_configurar_claude``/
+    ``_configurar_codex``), acá Jarvis NO tiene una terminal propia que
+    heredar (arrancó desde el ícono de escritorio, sin stdin/stdout real):
+    por eso abre una Terminal.app visible con el comando de login (patrón
+    estándar en macOS vía ``osascript``/AppleScript) y, mientras tanto,
+    pollea ``hay_sesion()`` sin bloquear la ventana hasta detectar que el
+    login terminó o se agota ``TIMEOUT_LOGIN_VENTANA_SEGUNDOS``."""
+    if hay_sesion():
+        servidor.actualizar(paso="hecho", mensaje=f"Ya había una sesión de {nombre} activa.")
+        return _guardar_motor(motor)
+
+    servidor.actualizar(
+        paso="esperando_login",
+        mensaje=(
+            f"Abriendo una Terminal para iniciar sesión en {nombre}. Completá el "
+            "inicio de sesión ahí (incluyendo el navegador si lo pide); esta "
+            "ventana sigue solo y se cierra cuando termines."
+        ),
+    )
+    try:
+        _abrir_terminal_con_comando(comando)
+    except OSError as error:
+        raise RuntimeError(
+            f"No pude abrir una Terminal para `{' '.join(comando)}` ({error})."
+        ) from error
+
+    limite = time.monotonic() + TIMEOUT_LOGIN_VENTANA_SEGUNDOS
+    while time.monotonic() < limite:
+        if hay_sesion():
+            servidor.actualizar(paso="hecho", mensaje=f"Sesión de {nombre} activa.")
+            return _guardar_motor(motor)
+        time.sleep(ESPERA_ENTRE_POLLEOS_SEGUNDOS)
+
+    raise RuntimeError(
+        f"No detecté una sesión activa de {nombre} después de "
+        f"{TIMEOUT_LOGIN_VENTANA_SEGUNDOS}s. Completá el inicio de sesión en la "
+        "Terminal que se abrió y volvé a abrir Jarvis."
+    )
+
+
+def _abrir_terminal_con_comando(comando: list[str]) -> None:
+    """Abre una Terminal.app visible corriendo ``comando``: es el único
+    camino real para un login interactivo (OAuth en el navegador) cuando
+    Jarvis no tiene su propia terminal para heredar (ver
+    ``_atender_login_ventana``). Patrón estándar en macOS: pedirle a
+    Terminal.app, vía AppleScript, que corra el comando. No usa
+    ``capture_output``/``check``: solo hace falta disparar la ventana, no
+    esperar a que el proceso de ``osascript`` en sí termine ni leer su
+    salida (abre la Terminal y vuelve enseguida)."""
+    guion = " ".join(shlex.quote(parte) for parte in comando)
+    aplescript = f'tell application "Terminal" to do script "{guion}"'
+    subprocess.run(["osascript", "-e", aplescript], timeout=10, check=True)
 
 
 def _tomar_instancia_unica(carpeta_datos: Path) -> bool:

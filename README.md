@@ -92,9 +92,14 @@ clave directa de Anthropic (`ANTHROPIC_API_KEY`) sigue funcionando si la
 ponés vos mismo en `.env` y elegís Anthropic en el menú (o la sesión de
 Claude Code), pero el menú ya no la pide ni la pega por vos.
 
-El menú necesita una terminal interactiva: desde el ícono de escritorio
-(sin ventana) no se puede mostrar ni completar un login. Usá siempre una
-terminal para la primera conexión y para cambiar de proveedor.
+El menú se muestra por terminal (`input()`/`print()`) si hay una terminal
+interactiva de verdad. Si no (ej. doble clic en el ícono de escritorio, sin
+terminal) pero hay entorno gráfico disponible (hoy: macOS con PyObjC), se
+muestra en cambio una ventana nativa con el mismo menú de 2 niveles: elegir
+modelo local o proveedor, y si hace falta loguearse, se abre una Terminal.app
+visible con `claude`/`codex login` mientras la ventana espera y pollea hasta
+detectar la sesión activa. Sin terminal ni entorno gráfico, no hay forma de
+mostrar el menú y Jarvis falla con un mensaje claro.
 
 `--reconfigurar-ia` ya no tiene efecto propio (el menú corre siempre); se
 conserva solo por compatibilidad con scripts o accesos existentes.
@@ -254,11 +259,11 @@ pantalla.
 
 Importante:
 
-- **El ícono de escritorio no sirve para elegir ni cambiar de proveedor.**
-  El menú de conexión corre en todo arranque (ver más arriba) y necesita una
-  terminal interactiva para mostrarse y, si hace falta, completar un login.
-  Sin ventana de terminal, el ícono no puede hacer ninguna de las dos cosas.
-  Usá siempre `python -m jarvis` desde una terminal para la primera conexión
+- **El ícono de escritorio en macOS sí puede elegir o cambiar de proveedor**,
+  mostrando el menú en una ventana nativa en vez de una terminal (ver más
+  arriba) — requiere PyObjC instalado, igual que la ventana flotante del HUD.
+  En Windows y Linux el ícono todavía no tiene ventana propia para esto: ahí
+  seguí usando `python -m jarvis` desde una terminal para la primera conexión
   o para cambiar de proveedor.
 - **macOS puede avisar "desarrollador no identificado"** la primera vez que
   abras el ícono (no está firmado ni notarizado): clic derecho → Abrir, o

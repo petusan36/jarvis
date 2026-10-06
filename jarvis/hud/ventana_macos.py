@@ -83,6 +83,86 @@ def ejecutar_con_ventana_flotante(url: str, trabajo: Callable[[], None]) -> None
     app = AppKit.NSApplication.sharedApplication()
     app.setActivationPolicy_(AppKit.NSApplicationActivationPolicyAccessory)  # sin ícono en el Dock
     _ventana = _crear_ventana(url)  # noqa: F841 — referencia viva, que no la recoja el GC
+    _correr_trabajo_y_terminar(app, trabajo)
+
+
+ANCHO_MENU = 480
+ALTO_MENU = 420
+
+
+def _crear_ventana_menu(url: str):
+    """Como ``_crear_ventana``, pero una ventana normal (con título y botón
+    de cerrar, centrada en pantalla) en vez del widget flotante sin marco
+    del HUD: el menú de conexión con IA necesita que el usuario haga click
+    y foco con normalidad, no que flote encima de todo."""
+    import AppKit
+    import WebKit
+    from Foundation import NSURL, NSURLRequest
+
+    pantalla = AppKit.NSScreen.mainScreen().frame()
+    ancho, alto = ANCHO_MENU, ALTO_MENU
+    x = (pantalla.size.width - ancho) / 2
+    y = (pantalla.size.height - alto) / 2
+    marco = AppKit.NSMakeRect(x, y, ancho, alto)
+
+    estilo = AppKit.NSWindowStyleMaskTitled | AppKit.NSWindowStyleMaskClosable
+    ventana = AppKit.NSWindow.alloc().initWithContentRect_styleMask_backing_defer_(
+        marco, estilo, AppKit.NSBackingStoreBuffered, False,
+    )
+    ventana.setTitle_("Jarvis")
+    ventana.setLevel_(AppKit.NSNormalWindowLevel)
+
+    vista = WebKit.WKWebView.alloc().initWithFrame_(AppKit.NSMakeRect(0, 0, ancho, alto))
+    vista.loadRequest_(NSURLRequest.requestWithURL_(NSURL.URLWithString_(url)))
+
+    ventana.setContentView_(vista)
+    ventana.makeKeyAndOrderFront_(None)
+    return ventana
+
+
+def ejecutar_ventana_menu(url: str, trabajo: Callable[[], None]) -> None:
+    """Como ``ejecutar_con_ventana_flotante``, pero con la ventana normal de
+    ``_crear_ventana_menu`` — y, a diferencia de esa, VUELVE de verdad:
+    cuando ``trabajo`` termina, cierra solo la ventana (``NSApp.stop_`` +
+    un evento para despertar el run loop) en vez de terminar el proceso
+    entero con ``terminate:``. Hace falta así porque, después del menú, el
+    mismo proceso de Python tiene que seguir (crear el "cerebro" con el
+    motor elegido y arrancar el modo voz/HUD de siempre) — no es la última
+    ventana del programa, como sí lo es la del HUD."""
+    import AppKit
+
+    app = AppKit.NSApplication.sharedApplication()
+    app.setActivationPolicy_(AppKit.NSApplicationActivationPolicyRegular)  # con ícono en el Dock: es la app visible
+    ventana = _crear_ventana_menu(url)
+    app.activateIgnoringOtherApps_(True)
+
+    def _trabajo_y_cerrar_ventana() -> None:
+        try:
+            trabajo()
+        finally:
+            ventana.performSelectorOnMainThread_withObject_waitUntilDone_(
+                "orderOut:", None, False,
+            )
+            app.stop_(None)
+            # app.stop_ solo marca una bandera que el run loop revisa en el
+            # próximo evento: sin esto, si no llega ningún evento real
+            # (ej. el usuario no mueve el mouse), app.run() nunca vuelve.
+            evento_despertador = AppKit.NSEvent.otherEventWithType_location_modifierFlags_timestamp_windowNumber_context_subtype_data1_data2_(
+                AppKit.NSEventTypeApplicationDefined, (0, 0), 0, 0, 0, None, 0, 0, 0,
+            )
+            app.postEvent_atStart_(evento_despertador, True)
+
+    hilo = threading.Thread(target=_trabajo_y_cerrar_ventana, daemon=True)
+    hilo.start()
+    app.run()
+    ventana.close()
+
+
+def _correr_trabajo_y_terminar(app, trabajo: Callable[[], None]) -> None:
+    """Corre ``trabajo`` en un hilo aparte mientras el hilo principal corre
+    el bucle de eventos de Cocoa (lo exige AppKit), y termina ese bucle
+    cuando ``trabajo`` vuelve, cierre o lance lo que lance."""
+    import AppKit
 
     def _trabajo_y_cerrar() -> None:
         try:
