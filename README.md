@@ -364,12 +364,18 @@ Todo se ajusta en el archivo `.env` (mira `.env.example`):
 |---|---|---|
 | `ANTHROPIC_API_KEY` | — | Tu clave de Claude (no hace falta con la suscripción) |
 | `JARVIS_MOTOR` | `auto` | `api`, `suscripcion` o `codex`. El menú de cada arranque lo elige y lo guarda acá; no hace falta tocarlo a mano. |
+| `JARVIS_PROVEEDOR` | `anthropic` | `anthropic` u `ollama` (solo aplica con `JARVIS_MOTOR=api`) |
+| `JARVIS_OLLAMA_URL` | `http://localhost:11434` | Base de la API local de Ollama, si el proveedor es `ollama` |
 | `JARVIS_NOMBRE_USUARIO` | `señor` | Cómo te llama Jarvis |
-| `JARVIS_MODELO` | `claude-opus-5-5` | Modelo de Claude |
+| `JARVIS_MODELO` | `claude-opus-5-5` | Modelo de IA (Claude, o el que corresponda según el proveedor) |
 | `JARVIS_ESFUERZO` | `low` | `low` responde más rápido; `medium`/`high` piensa más |
 | `JARVIS_MODELO_WHISPER` | `small` | `tiny`, `base`, `small`, `medium`, `large-v3` |
 | `JARVIS_IDIOMA` | `es` | Idioma de escucha y de voz |
-| `JARVIS_CARPETA_DATOS` | `~/.jarvis` | Dónde se guardan las notas |
+| `JARVIS_CARPETA_DATOS` | `~/.jarvis` | Dónde se guardan `.env`, notas y la memoria permanente |
+| `JARVIS_MEMORIA` | `0` | `1` activa la memoria permanente (requiere Ollama + `nomic-embed-text`) |
+| `JARVIS_MEMORIA_MODELO_LLM` | `qwen3:8b` | Modelo de Ollama para extracción de entidades (Graphiti) |
+| `JARVIS_MEMORIA_MODELO_EMBEDDING` | `nomic-embed-text` | Modelo de embeddings, local, sin clave |
+| `JARVIS_MEMORIA_VENTANA_GRACIA_DIAS` | `180` | Cuánto tardan los hechos invalidados en archivarse en frío |
 | `JARVIS_PUERTO_HUD` | `8765` | Puerto local de la animación (`--hud`) |
 | `JARVIS_PALABRA_ACTIVACION` | (vacío) | Si se define (p. ej. `jarvis`), solo responde cuando le llamas |
 | `JARVIS_SENSIBILIDAD_VOZ` | `3` | Cuánto más alto que el ruido de fondo debe sonar la voz |
@@ -385,21 +391,26 @@ Todo se ajusta en el archivo `.env` (mira `.env.example`):
 
 ```
 jarvis/
-├── __main__.py      bucle principal (modo texto y modo voz)
-├── cerebro.py       conversación con Claude (API) y ejecución de herramientas
-├── cerebro_suscripcion.py  lo mismo usando tu suscripción (Claude Agent SDK)
-├── herramientas.py  herramientas que Claude puede usar
+├── __main__.py      punto de entrada: menú de conexión + bucle principal
+├── cerebro.py       conversación vía el puerto ProveedorIA + ejecución de herramientas
+├── cerebro_suscripcion.py  lo mismo usando tu suscripción de Claude (Agent SDK)
+├── proveedores/     puerto ProveedorIA y adaptadores (Anthropic, Ollama, Codex)
+├── memoria/         puerto PuertoMemoria + adaptador Graphiti/LadybugDB/Ollama + archivo frío
+├── herramientas.py  herramientas que el modelo puede usar
 ├── sistema.py       herramientas de carpetas, aplicaciones y PDFs (macOS)
 ├── musica.py        buscar y reproducir música en YouTube
 ├── web.py           abrir páginas web / buscar en Google
-├── config.py        configuración desde .env
-├── escritorio.py    ícono de escritorio (--instalar-app)
-├── hud/             animación estilo Jarvis (servidor local + hud.html)
-│   └── ventana_macos.py  ventana flotante nativa sin marco (macOS, PyObjC)
+├── config.py        configuración desde .env (en ~/.jarvis, no en el repo)
+├── escritorio.py    ícono de escritorio (--instalar-app): copia el bundle standalone
+├── hud/             animación estilo Jarvis + menú en ventana nativa (sin tty)
+│   ├── ventana_macos.py   ventana flotante/nativa sin marco (macOS, PyObjC)
+│   ├── servidor_menu.py   servidor HTTP local del menú (token por sesión)
+│   └── menu.html          página del menú de conexión con IA
 └── voz/
     ├── oido.py      micrófono + Whisper (faster-whisper)
     └── habla.py     síntesis de voz (elevenlabs, kokoro, piper, macos, pyttsx3)
-tests/               pruebas sin red (cliente de Claude simulado)
+scripts/             build_app.sh + spec de PyInstaller para el bundle standalone
+tests/               pruebas sin red (proveedores/memoria simulados)
 ```
 
 ## Añadir una herramienta
