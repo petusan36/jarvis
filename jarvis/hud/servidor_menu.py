@@ -19,16 +19,30 @@ from __future__ import annotations
 
 import json
 import queue
+import secrets
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib import resources
 from typing import Any
 
+_LARGO_MAXIMO_ACCION = 4096  # el cuerpo de /accion es un click, no debería pesar nada
+
 
 class ServidorMenu:
-    """Levanta el servidor y lo deja escuchando en un hilo aparte."""
+    """Levanta el servidor y lo deja escuchando en un hilo aparte.
+
+    ``POST /accion`` dispara pasos con efectos reales (elegir modelo, abrir
+    una Terminal y correr ``codex login``/``claude``), así que no puede
+    quedar abierto sin autenticar: cualquier página que el usuario tenga
+    abierta en su navegador mientras este servidor está vivo podría
+    mandarle un POST (es un ``fetch`` simple, sin preflight de CORS, igual
+    que el que usa ``menu.html``). Por eso cada instancia genera un token
+    al azar, lo embebe en la página que sirve (que una página de otro
+    origen no puede leer) y exige ese mismo token en cada ``POST /accion``
+    vía el encabezado ``X-Jarvis-Token``."""
 
     def __init__(self, puerto: int = 0):
+        self.token = secrets.token_urlsafe(32)
         self._cerrojo = threading.Lock()
         self._estado: dict[str, Any] = {"paso": "inicio"}
         self._acciones: queue.Queue = queue.Queue()
@@ -67,7 +81,8 @@ class ServidorMenu:
 
 
 def _crear_servidor(puerto: int, servidor_menu: ServidorMenu) -> ThreadingHTTPServer:
-    pagina = resources.files(__package__).joinpath("menu.html").read_bytes()
+    plantilla = resources.files(__package__).joinpath("menu.html").read_text(encoding="utf-8")
+    pagina = plantilla.replace("__JARVIS_TOKEN__", servidor_menu.token).encode("utf-8")
 
     class Manejador(BaseHTTPRequestHandler):
         def do_GET(self):
@@ -83,7 +98,13 @@ def _crear_servidor(puerto: int, servidor_menu: ServidorMenu) -> ThreadingHTTPSe
             if self.path != "/accion":
                 self._enviar(404, "text/plain; charset=utf-8", b"No encontrado")
                 return
+            if not secrets.compare_digest(self.headers.get("X-Jarvis-Token", ""), servidor_menu.token):
+                self._enviar(403, "text/plain; charset=utf-8", b"Token invalido")
+                return
             largo = int(self.headers.get("Content-Length", 0))
+            if largo > _LARGO_MAXIMO_ACCION:
+                self._enviar(413, "text/plain; charset=utf-8", b"Cuerpo demasiado grande")
+                return
             crudo = self.rfile.read(largo) if largo else b"{}"
             try:
                 accion = json.loads(crudo.decode("utf-8") or "{}")

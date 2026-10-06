@@ -19,9 +19,10 @@ def _get(url: str) -> tuple[int, bytes]:
         return resp.status, resp.read()
 
 
-def _post(url: str, cuerpo: dict) -> int:
+def _post(url: str, cuerpo: dict, token: str | None = None) -> int:
     datos = json.dumps(cuerpo).encode("utf-8")
-    peticion = urllib.request.Request(url, data=datos, method="POST")
+    headers = {"X-Jarvis-Token": token} if token is not None else {}
+    peticion = urllib.request.Request(url, data=datos, method="POST", headers=headers)
     with urllib.request.urlopen(peticion, timeout=5) as resp:
         return resp.status
 
@@ -69,9 +70,51 @@ def test_get_estado_devuelve_json_del_estado_actual():
 def test_post_accion_llega_a_esperar_accion():
     servidor = ServidorMenu()
     try:
-        codigo = _post(servidor.url + "accion", {"tipo": "local"})
+        codigo = _post(servidor.url + "accion", {"tipo": "local"}, token=servidor.token)
         assert codigo == 204
         assert servidor.esperar_accion(timeout=5) == {"tipo": "local"}
+    finally:
+        servidor.cerrar()
+
+
+def test_post_accion_sin_token_da_403_y_no_llega_a_esperar_accion():
+    """CSRF: una página de otro origen que le pegue a /accion sin conocer el
+    token (embebido en el HTML que solo este servidor sirve) no puede
+    disparar acciones."""
+    servidor = ServidorMenu()
+    try:
+        try:
+            _post(servidor.url + "accion", {"tipo": "local"})
+        except urllib.error.HTTPError as error:
+            assert error.code == 403
+        else:
+            raise AssertionError("esperaba un 403 sin token")
+        assert servidor.esperar_accion(timeout=0.2) is None
+    finally:
+        servidor.cerrar()
+
+
+def test_post_accion_con_token_incorrecto_da_403():
+    servidor = ServidorMenu()
+    try:
+        try:
+            _post(servidor.url + "accion", {"tipo": "local"}, token="token-adivinado")
+        except urllib.error.HTTPError as error:
+            assert error.code == 403
+        else:
+            raise AssertionError("esperaba un 403 con token incorrecto")
+    finally:
+        servidor.cerrar()
+
+
+def test_pagina_principal_incluye_el_token_real():
+    """El HTML servido tiene el token embebido (no el placeholder sin
+    reemplazar), que es justo lo que lo hace ilegible para un origen ajeno."""
+    servidor = ServidorMenu()
+    try:
+        _, cuerpo = _get(servidor.url)
+        assert servidor.token.encode() in cuerpo
+        assert b"__JARVIS_TOKEN__" not in cuerpo
     finally:
         servidor.cerrar()
 

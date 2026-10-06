@@ -29,8 +29,14 @@
   <div id="app"><p class="ayuda">Cargando…</p></div>
 
 <script>
+const TOKEN = "__JARVIS_TOKEN__";
+
 async function elegir(accion) {
-  await fetch("/accion", { method: "POST", body: JSON.stringify(accion) });
+  await fetch("/accion", {
+    method: "POST",
+    headers: { "X-Jarvis-Token": TOKEN },
+    body: JSON.stringify(accion),
+  });
 }
 
 function render(estado) {
