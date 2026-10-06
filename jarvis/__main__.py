@@ -55,7 +55,11 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.instalar_app:
         from .escritorio import instalar_app_escritorio
-        print(f"Listo: {instalar_app_escritorio()}")
+        try:
+            print(f"Listo: {instalar_app_escritorio()}")
+        except RuntimeError as error:
+            print(error, file=sys.stderr)
+            return 1
         return 0
 
     config = Config.desde_entorno()
