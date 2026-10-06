@@ -13,7 +13,10 @@ import operator
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any, Callable
+
+if TYPE_CHECKING:
+    from .memoria.puerto import PuertoMemoria
 
 
 @dataclass
@@ -38,16 +41,58 @@ class Herramienta:
         }
 
 
+_PALABRAS_AFIRMATIVAS = {
+    "si", "sí", "dale", "ok", "okay", "listo", "correcto", "exacto",
+    "afirmativo", "confirmo", "claro", "obvio", "efectivamente", "simon",
+}
+
+
+def _suena_afirmativo(mensaje: str) -> bool:
+    """Heurística deliberadamente simple (lista fija de afirmaciones
+    frecuentes en español, no un modelo): alcanza para bloquear una
+    confirmación que el usuario nunca escribió, que es lo que importa acá
+    — no se busca distinguir matices, solo exigir ALGO que de verdad
+    parezca un sí antes de escribir en memoria permanente.
+
+    Mira SOLO la primera palabra, nunca "¿aparece en algún lugar del
+    mensaje?": un mensaje como "no, dale, mejor cancelá" contiene "dale"
+    (está en la lista) pero no es un sí — es justo lo contrario. Buscar la
+    palabra en cualquier posición abría ese bypass."""
+    palabras = mensaje.strip(".,!¿?¡ ").lower().split()
+    if not palabras:
+        return False
+    primera = palabras[0].strip(".,!¿?¡")
+    return primera in _PALABRAS_AFIRMATIVAS
+
+
 class Herramientas:
     """Registro de herramientas disponibles para una sesión."""
 
-    def __init__(self, carpeta_datos: Path, sistema: bool = True, youtube_api_key: str = ""):
+    def __init__(
+        self,
+        carpeta_datos: Path,
+        sistema: bool = True,
+        youtube_api_key: str = "",
+        memoria: "PuertoMemoria | None" = None,
+    ):
         self.carpeta_datos = carpeta_datos
         self._registro: dict[str, Herramienta] = {}
         # Cuenta los mensajes del usuario; sirve para exigir confirmaciones en un mensaje aparte.
         self.turno = 0
+        # Último mensaje tal cual lo escribió/dijo el usuario, para que una
+        # confirmación (ver "recordar") pueda verificar que de verdad dijo
+        # algo afirmativo, no solo que pasó un turno — sin esto, un mensaje
+        # inyectado (ej. desde una página web que Jarvis lea) podía hacer
+        # que el modelo llamara confirmado=true sin que el usuario dijera
+        # nada parecido a un sí.
+        self.ultimo_mensaje_usuario = ""
         # El bucle principal revisa esto después de cada respuesta para saber si debe terminar.
         self.salir_pedido = False
+        # Puerto de memoria permanente (ver jarvis.memoria). Si es None, la
+        # herramienta "recordar" no se registra y Cerebro no inyecta
+        # contexto de memoria en el prompt: Jarvis sigue funcionando igual
+        # que antes de esta tarea.
+        self.memoria = memoria
         self._registrar_basicas()
         if sistema:
             from .sistema import registrar_sistema
@@ -56,10 +101,13 @@ class Herramientas:
         registrar_musica(self, youtube_api_key)
         from .web import registrar_web
         registrar_web(self)
+        if memoria is not None:
+            self._registrar_memoria(memoria)
 
-    def nuevo_turno(self) -> None:
+    def nuevo_turno(self, texto_usuario: str = "") -> None:
         """Avisa de que ha llegado un mensaje nuevo del usuario."""
         self.turno += 1
+        self.ultimo_mensaje_usuario = texto_usuario
 
     def registrar(self, nombre: str, descripcion: str, parametros: dict[str, Any]):
         def decorador(funcion: Callable[..., str]) -> Callable[..., str]:
@@ -135,6 +183,67 @@ class Herramientas:
         def cerrar_jarvis() -> str:
             self.salir_pedido = True
             return "Cerrando Jarvis."
+
+    def _registrar_memoria(self, memoria: "PuertoMemoria") -> None:
+        # Escrituras pendientes de confirmar: (hecho, valor) → turno en que se pidieron.
+        # Mismo patrón que cerrar_aplicacion (ver sistema.py): sin esto, cualquier
+        # instrucción inyectada (p. ej. desde una página web o un PDF que Jarvis lea)
+        # podía hacer que el modelo grabara algo en memoria permanente sin que el
+        # usuario lo viera ni lo aprobara — y esa memoria se re-inyecta en el
+        # system prompt de TODAS las conversaciones futuras (ver _contexto_memoria).
+        pendientes: dict[tuple[str, str], int] = {}
+
+        @self.registrar(
+            "recordar",
+            "Guarda en la memoria permanente de Jarvis un hecho sobre el usuario "
+            "(preferencias, datos personales, rutinas...) para recordarlo en futuras "
+            "conversaciones, incluso después de cerrar Jarvis. Si el hecho actualiza uno "
+            "anterior (por ejemplo, un cambio de preferencia), el anterior queda "
+            "reemplazado automáticamente, sin quedar contradictorio. Úsala solo cuando el "
+            "usuario comparta algo que valga la pena recordar a futuro, no para cada dato "
+            "suelto de la conversación. Llámala primero con confirmado=false: eso deja el "
+            "guardado pendiente. Dile al usuario qué vas a recordar y espera su respuesta. "
+            "Solo si en su siguiente mensaje confirma, vuelve a llamarla con confirmado=true.",
+            {
+                "hecho": {
+                    "type": "string",
+                    "description": "Qué tipo de hecho es, en pocas palabras, p. ej. 'género de música preferido'.",
+                },
+                "valor": {
+                    "type": "string",
+                    "description": "El valor del hecho, p. ej. 'rock'.",
+                },
+                "confirmado": {
+                    "type": "boolean",
+                    "description": "true solo si el usuario ya confirmó que quiere que se guarde esto.",
+                },
+            },
+        )
+        def recordar(hecho: str, valor: str, confirmado: bool) -> str:
+            clave = (hecho.strip().lower(), valor.strip().lower())
+            pedido_en = pendientes.get(clave)
+            # Tres condiciones, no una: que el pedido sea justo del turno
+            # ANTERIOR (no "en algún momento antes" — un pendiente viejo
+            # colgado ahí podía quedar satisfecho por un "sí" de otro tema,
+            # en otro turno, meses después: la confirmación no estaba atada
+            # al pedido concreto); que lo que el usuario escribió en ese
+            # turno exacto suene a un sí; y que "confirmado=true" lo diga el
+            # modelo (no prueba nada por sí solo, es la entrada que controla
+            # el modelo, no el usuario — por eso las otras dos condiciones).
+            confirmacion_real = confirmado and pedido_en is not None \
+                and pedido_en == self.turno - 1 \
+                and _suena_afirmativo(self.ultimo_mensaje_usuario)
+            if not confirmacion_real:
+                # Un pedido no confirmado en el turno siguiente expira: no
+                # queda pendiente "para siempre" esperando que coincida con
+                # cualquier sí futuro de otro tema.
+                pendientes.pop(clave, None)
+                pendientes[clave] = self.turno
+                return (f"Guardar «{hecho}: {valor}» en memoria, pendiente de confirmar. "
+                        "Pregúntale al usuario si quiere que lo recuerdes y esperá su "
+                        "respuesta antes de llamar de nuevo con confirmado=true.")
+            del pendientes[clave]
+            return memoria.recordar(hecho, valor)
 
     def _ruta_notas(self) -> Path:
         return self.carpeta_datos / "notas.json"
