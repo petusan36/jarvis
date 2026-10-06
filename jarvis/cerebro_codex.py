@@ -8,22 +8,25 @@ sistema operativo si configuraste ``storage=keyring``): Jarvis no la lee,
 no la pide y no la guarda, igual que ``cerebro_suscripcion.py`` con Claude
 Code.
 
-Limitaciones conocidas (TODO):
+Dos cosas verificadas de verdad en una instalación real (codex-cli
+0.160.1), porque el texto de ``codex exec`` sin ``--json`` no es seguro de
+parsear (trae un banner con workdir/model/session id/tokens, con colores
+ANSI, antes de la respuesta):
 
-- No le pasamos las herramientas de Jarvis a Codex como servidor MCP
-  (``cerebro_suscripcion.py`` sí lo hace para Claude, vía
-  ``create_sdk_mcp_server``). Codex CLI soporta MCP, pero conectarlo así
-  queda pendiente — por ahora cada turno es solo conversación de texto.
-- ``codex exec`` no mantiene la sesión entre invocaciones de forma que
-  pudiéramos verificar en esta máquina (el binario instalado estaba roto:
-  ``codex`` no ejecutaba nada, ver nota en el README/commit). Mientras no
-  se confirme el mecanismo real de continuar una sesión, cada turno manda
-  la conversación completa como texto plano (igual que ``Cerebro`` reenvía
-  todo su historial en cada llamada a la API).
-- Los nombres de flags (``--skip-git-repo-check``, ``--sandbox
-  read-only``) vienen de la documentación pública de Codex CLI, no de
-  ``codex exec --help`` corrido en esta máquina (la instalación local
-  estaba rota). Si tu versión de Codex los nombra distinto, ajustalos acá.
+- ``--json`` imprime eventos JSONL limpios por stdout; el primero,
+  ``{"type":"thread.started","thread_id":"<uuid>"}``, da el id de sesión.
+- ``-o/--output-last-message <archivo>`` escribe SOLO la respuesta final
+  del agente a un archivo — es lo que hay que leer, nunca ``stdout``.
+- El primer turno de una conversación es ``codex exec ... <prompt>``; los
+  siguientes son ``codex exec resume <thread_id> ... <mensaje>``, que
+  continúa la misma sesión sin que Jarvis tenga que reenviar el historial
+  como texto. ``resume`` no acepta ``--sandbox`` (la sesión ya resumida
+  usa la configuración con la que arrancó).
+
+Limitación conocida (TODO): a diferencia de ``cerebro_suscripcion.py``, no
+le pasamos las herramientas de Jarvis a Codex como servidor MCP. Codex CLI
+soporta MCP, pero conectarlo así queda pendiente — por ahora cada turno es
+solo conversación de texto.
 
 Pensado solo para uso personal en tu propio equipo: no lo compartas con
 otras personas usando tu cuenta.
@@ -31,8 +34,11 @@ otras personas usando tu cuenta.
 
 from __future__ import annotations
 
+import json
 import shutil
 import subprocess
+import tempfile
+from pathlib import Path
 from typing import Callable
 
 from .cerebro import INSTRUCCIONES
@@ -45,7 +51,12 @@ Ejecutor = Callable[[list[str]], subprocess.CompletedProcess]
 
 
 def _ejecutar(comando: list[str]) -> subprocess.CompletedProcess:
-    return subprocess.run(comando, capture_output=True, text=True, timeout=TIMEOUT_SEGUNDOS)
+    # stdin=DEVNULL: sin esto, "codex exec" intenta leer stdin adicional y
+    # podría quedarse esperando si el proceso que lanza Jarvis no tiene un
+    # stdin ya cerrado (p. ej. corriendo como app de escritorio).
+    return subprocess.run(
+        comando, capture_output=True, text=True, timeout=TIMEOUT_SEGUNDOS, stdin=subprocess.DEVNULL,
+    )
 
 
 class CerebroCodex:
@@ -58,46 +69,74 @@ class CerebroCodex:
         self.config = config
         self.herramientas = herramientas
         self._ejecutar = ejecutar
-        # (rol, texto); se reenvía completo en cada turno, ver limitaciones arriba.
-        self.historial: list[tuple[str, str]] = []
+        # id de la sesión de Codex en curso; None = todavía no hay ninguna
+        # (el próximo turno arranca una nueva, con las instrucciones de Jarvis).
+        self._id_sesion: str | None = None
 
     def responder(self, texto_usuario: str) -> str:
         self.herramientas.nuevo_turno()
-        self.historial.append(("usuario", texto_usuario))
-        prompt = _construir_prompt(self.config, self.historial)
 
+        descriptor = tempfile.NamedTemporaryFile(prefix="jarvis-codex-", suffix=".txt", delete=False)
+        ruta_salida = Path(descriptor.name)
+        descriptor.close()
         try:
-            resultado = self._ejecutar([
+            comando = self._construir_comando(texto_usuario, ruta_salida)
+            try:
+                resultado = self._ejecutar(comando)
+            except FileNotFoundError:
+                return "Falta Codex CLI. Instálalo con: npm install -g @openai/codex"
+            except subprocess.TimeoutExpired:
+                return "Codex está tardando demasiado en responder. Probá de nuevo."
+
+            if resultado.returncode != 0:
+                return _mensaje_de_error(resultado.stderr)
+
+            id_sesion = _extraer_id_sesion(resultado.stdout)
+            if id_sesion:
+                self._id_sesion = id_sesion
+
+            texto = ruta_salida.read_text("utf-8").strip() if ruta_salida.is_file() else ""
+            return texto or "..."
+        finally:
+            ruta_salida.unlink(missing_ok=True)
+
+    def _construir_comando(self, texto_usuario: str, ruta_salida: Path) -> list[str]:
+        if self._id_sesion is None:
+            # Primer turno: arranca una sesión nueva con las instrucciones de Jarvis.
+            prompt = f"{INSTRUCCIONES.format(nombre=self.config.nombre_usuario)}\n\n{texto_usuario}"
+            return [
                 "codex", "exec",
-                "--skip-git-repo-check",
-                "--sandbox", "read-only",
+                "--skip-git-repo-check", "--sandbox", "read-only", "--json",
+                "-o", str(ruta_salida),
                 prompt,
-            ])
-        except FileNotFoundError:
-            return "Falta Codex CLI. Instálalo con: npm install -g @openai/codex"
-        except subprocess.TimeoutExpired:
-            return "Codex está tardando demasiado en responder. Probá de nuevo."
-
-        if resultado.returncode != 0:
-            return _mensaje_de_error(resultado.stderr)
-
-        texto = resultado.stdout.strip()
-        self.historial.append(("asistente", texto))
-        return texto or "..."
+            ]
+        # Turnos siguientes: continúa la misma sesión, sin reenviar nada más.
+        return [
+            "codex", "exec", "resume", self._id_sesion,
+            "--skip-git-repo-check", "--json",
+            "-o", str(ruta_salida),
+            texto_usuario,
+        ]
 
     def olvidar(self) -> None:
-        """Empieza una conversación nueva."""
-        self.historial.clear()
+        """Empieza una conversación nueva: el próximo turno abre otra sesión."""
+        self._id_sesion = None
 
 
-def _construir_prompt(config: Config, historial: list[tuple[str, str]]) -> str:
-    """Codex CLI no nos dio (en esta máquina) una forma verificada de pasar
-    un system prompt separado ni de continuar una sesión entre llamadas, así
-    que se manda todo como un único texto: instrucciones + transcripción."""
-    partes = [INSTRUCCIONES.format(nombre=config.nombre_usuario)]
-    for rol, texto in historial:
-        partes.append(f"{'Usuario' if rol == 'usuario' else 'Jarvis'}: {texto}")
-    return "\n\n".join(partes)
+def _extraer_id_sesion(salida_jsonl: str) -> str | None:
+    """Busca el evento ``thread.started`` en la salida ``--json`` (JSONL) y
+    devuelve su ``thread_id``, que es el id que acepta ``codex exec resume``."""
+    for linea in salida_jsonl.splitlines():
+        linea = linea.strip()
+        if not linea:
+            continue
+        try:
+            evento = json.loads(linea)
+        except json.JSONDecodeError:
+            continue
+        if evento.get("type") == "thread.started":
+            return evento.get("thread_id")
+    return None
 
 
 def _mensaje_de_error(stderr: str | None) -> str:
