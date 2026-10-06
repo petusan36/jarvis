@@ -4,8 +4,15 @@
 Por defecto arranca el modo completo: te escucha, te responde hablando y abre
 la animación HUD. Usa --texto para el modo clásico de escribir y leer.
 --instalar-app crea un ícono de escritorio y termina sin arrancar Jarvis.
---reconfigurar-ia vuelve a preguntar cómo conectar con un modelo de IA
-(local, Claude o Codex), en vez de usar lo ya guardado.
+
+El menú de conexión con un modelo de IA corre SIEMPRE en cada arranque normal
+(sin --instalar-app), en dos niveles: primero "¿local o proveedor en la
+nube?", y solo si elegís proveedor, "¿OpenAI o Anthropic?". Ya no hay un modo
+que salte el menú porque detecta algo ya configurado en .env o una sesión
+abierta: así podés cambiar de proveedor sin flags extra. Por eso
+--reconfigurar-ia quedó sin efecto propio (el menú ya corre siempre) — se
+conserva el flag solo para no romper scripts o accesos existentes que lo
+invoquen.
 """
 
 from __future__ import annotations
@@ -49,8 +56,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--instalar-app", action="store_true",
                         help="Crea un ícono de escritorio para esta instalación y termina.")
     parser.add_argument("--reconfigurar-ia", action="store_true",
-                        help="Vuelve a preguntar cómo conectar con un modelo de IA (local, "
-                             "proveedor en la nube o suscripción) y guarda la nueva elección.")
+                        help="Sin efecto propio: el menú para elegir cómo conectar con un "
+                             "modelo de IA ya corre siempre, en cada arranque. Se conserva "
+                             "solo por compatibilidad con scripts o accesos que lo invoquen.")
     args = parser.parse_args(argv)
 
     if args.instalar_app:
@@ -197,8 +205,17 @@ def _crear_cerebro(config: Config, forzar_menu: bool = False):
     """Elige cómo conectar con un modelo de IA: Ollama en local, Claude por
     suscripción (Claude Code) o Codex/OpenAI con la sesión de Codex CLI
     (vía el puerto ``ProveedorIA``, igual que Anthropic/Ollama).
-    ``forzar_menu=True`` (``--reconfigurar-ia``) ignora lo que ya hay
-    configurado y vuelve a preguntar.
+
+    El menú (``_menu_conexion_ia``) corre SIEMPRE, en cada arranque normal:
+    no hay modo "auto" que lo salte por haber algo ya guardado en .env o
+    una sesión detectada. ``forzar_menu`` queda como parámetro aceptado por
+    compatibilidad (lo pasa ``--reconfigurar-ia``), pero no cambia nada: el
+    menú ya corre igual.
+
+    Si elegís un proveedor en la nube (Claude o Codex) y todavía no
+    iniciaste sesión, el propio menú dispara el login (ver
+    ``_configurar_claude``/``_configurar_codex``) y espera a que termine
+    antes de seguir.
 
     Ya no hay forma de cargar una clave de OpenAI ni de pegar una de
     Anthropic desde el menú: ambas se conectan con la sesión ya logueada
@@ -207,29 +224,15 @@ def _crear_cerebro(config: Config, forzar_menu: bool = False):
     ya está en el entorno (uso directo de la API, sin pasar por ningún
     menú — comportamiento previo a todo esto, sin cambios)."""
     herramientas = Herramientas(config.carpeta_datos, youtube_api_key=config.youtube_api_key)
-    motor = config.motor
-    if forzar_menu:
-        if not sys.stdin.isatty():
-            raise RuntimeError("--reconfigurar-ia necesita una terminal interactiva.")
-        motor = _menu_conexion_ia()
-        config = Config.desde_entorno()
-    elif motor == "auto":
-        if _proveedor_configurado() or _hay_credenciales_api():
-            motor = "api"
-        elif _hay_sesion_claude():
-            motor = "suscripcion"
-        elif _hay_sesion_codex():
-            motor = "codex"
-        elif sys.stdin.isatty():
-            motor = _menu_conexion_ia()
-            config = Config.desde_entorno()
-        else:
-            raise RuntimeError(
-                "No encuentro cómo conectar con un modelo de IA. Elige una opción:\n"
-                "  - Modelo local: instala Ollama y descarga un modelo (ollama pull qwen3:8b).\n"
-                "  - Claude: ejecuta `claude` e inicia sesión con /login.\n"
-                "  - Codex: ejecuta `codex login` (instala antes Codex CLI si falta)."
-            )
+    if not sys.stdin.isatty():
+        raise RuntimeError(
+            "Necesito una terminal interactiva para preguntar cómo conectar con un "
+            "modelo de IA. Abrí una terminal y ejecutá python -m jarvis (el ícono de "
+            "escritorio no sirve para elegir o cambiar de proveedor: solo para arrancar "
+            "una vez que ya quedó configurado desde la terminal)."
+        )
+    motor = _menu_conexion_ia()
+    config = Config.desde_entorno()
     if motor in ("suscripcion", "suscripción"):
         from .cerebro_suscripcion import CerebroSuscripcion
         print("(usando tu suscripción de Claude a través de Claude Code)")
@@ -270,34 +273,59 @@ def _crear_adaptador(config: Config):
 
 
 def _menu_conexion_ia() -> str:
-    """Pregunta cómo conectar con un modelo de IA cuando no hay nada
-    configurado todavía (o cuando se pide explícitamente con
-    ``--reconfigurar-ia``). Ninguna de las tres opciones pide ni guarda
-    una clave de API: Claude y Codex usan la sesión que ya iniciaste en su
-    CLI, y Ollama no necesita clave. Solo se persiste en .env la elección
-    en sí (qué motor usar, qué modelo local), nunca un secreto.
+    """Primer nivel del menú de conexión con un modelo de IA: corre en
+    todo arranque normal (ver ``_crear_cerebro``). Pregunta primero si el
+    modelo es local o un proveedor en la nube; solo si elegís proveedor,
+    ``_menu_proveedor_nube`` pregunta cuál. Ninguna opción pide ni guarda
+    una clave de API: Claude y Codex usan la sesión que ya iniciaste (o
+    que Jarvis inicia por vos, ver ``_configurar_claude``/
+    ``_configurar_codex``) en su CLI, y Ollama no necesita clave. Solo se
+    persiste en .env la elección en sí (qué motor usar, qué modelo local),
+    nunca un secreto.
     """
-    print("No encuentro cómo conectar con un modelo de IA. ¿Qué querés usar?")
+    print("¿Cómo querés conectar con un modelo de IA?")
     print("  1) Un modelo local (Ollama)")
-    print("  2) Claude, con tu sesión (Claude Code)")
-    print("  3) Codex/OpenAI, con tu sesión (Codex CLI)")
+    print("  2) Un proveedor en la nube")
     try:
-        eleccion = input("Elige 1, 2 o 3: ").strip()
+        eleccion = input("Elige 1 o 2: ").strip()
     except (EOFError, KeyboardInterrupt):
         eleccion = ""
 
     if eleccion == "1":
         return _configurar_local()
     if eleccion == "2":
-        return _configurar_claude()
-    if eleccion == "3":
-        return _configurar_codex()
+        return _menu_proveedor_nube()
 
     raise RuntimeError(
         "No encuentro cómo conectar con un modelo de IA. Elige una opción:\n"
         "  - Modelo local: instala Ollama y descarga un modelo (ollama pull qwen3:8b).\n"
         "  - Claude: ejecuta `claude` e inicia sesión con /login.\n"
         "  - Codex: ejecuta `codex login` (instala antes Codex CLI si falta)."
+    )
+
+
+def _menu_proveedor_nube() -> str:
+    """Segundo nivel del menú, solo si en el primero se eligió "proveedor
+    en la nube". Si no hay sesión activa todavía, la opción elegida
+    dispara el login ella misma (ver ``_configurar_claude`` /
+    ``_configurar_codex``)."""
+    print("¿Qué proveedor en la nube?")
+    print("  1) OpenAI (Codex, con tu sesión de Codex CLI)")
+    print("  2) Anthropic (Claude, con tu sesión de Claude Code)")
+    try:
+        eleccion = input("Elige 1 o 2: ").strip()
+    except (EOFError, KeyboardInterrupt):
+        eleccion = ""
+
+    if eleccion == "1":
+        return _configurar_codex()
+    if eleccion == "2":
+        return _configurar_claude()
+
+    raise RuntimeError(
+        "No encuentro cómo conectar con un modelo de IA. Elige una opción:\n"
+        "  - OpenAI: ejecuta `codex login` (instala antes Codex CLI si falta).\n"
+        "  - Anthropic: ejecuta `claude` e inicia sesión con /login."
     )
 
 
@@ -337,12 +365,40 @@ def _configurar_local() -> str:
 
 
 def _configurar_claude() -> str:
-    """Usa tu sesión de Claude Code (sin clave de API)."""
+    """Usa tu sesión de Claude Code (sin clave de API). Si todavía no
+    iniciaste sesión, Jarvis mismo la dispara en vez de pedirte que abras
+    otra terminal.
+
+    Verificado con ``claude --help`` en esta máquina: Claude Code NO tiene
+    un subcomando de login no interactivo (no existe ``claude login``).
+    Todo el flujo de /login vive dentro de la sesión interactiva del REPL.
+    Por eso el mejor esfuerzo real posible — y lo que se implementa acá —
+    es lanzar `claude` como subproceso heredando stdin/stdout/stderr del
+    usuario: así ve el prompt de Claude Code, escribe /login, completa el
+    OAuth en el navegador, y vuelve a la terminal con /exit o Ctrl+D. Jarvis
+    espera a que ese subproceso termine y recién ahí verifica con
+    ``_hay_sesion_claude()`` si quedó una sesión activa — no hay forma más
+    fiable de confirmarlo sin esto."""
     if not _hay_sesion_claude():
-        raise RuntimeError(
-            "Todavía no iniciaste sesión. Hazlo y vuelve a ejecutar python -m jarvis:\n"
-            "  claude   (dentro, escribe /login e inicia sesión con tu cuenta)"
+        print(
+            "No encuentro una sesión de Claude Code. Voy a abrir `claude`: una vez "
+            "dentro, escribe /login, completa el inicio de sesión en el navegador y "
+            "después /exit (o Ctrl+D) para volver aquí."
         )
+        try:
+            subprocess.run(["claude"])
+        except OSError as error:
+            raise RuntimeError(
+                f"No pude ejecutar `claude` ({error}). ¿Está instalado? Instalalo con "
+                "npm install -g @anthropic-ai/claude-code o desde "
+                "https://docs.claude.com/claude-code."
+            ) from error
+        if not _hay_sesion_claude():
+            raise RuntimeError(
+                "No quedó una sesión activa de Claude Code después de /login. Volvé a "
+                "intentar: ejecuta python -m jarvis de nuevo y completá el inicio de "
+                "sesión dentro de `claude`."
+            )
     guardar_en_env("JARVIS_MOTOR", "suscripcion")
     os.environ["JARVIS_MOTOR"] = "suscripcion"
     print("(usando tu suscripción de Claude; elección guardada en .env)")
@@ -352,13 +408,34 @@ def _configurar_claude() -> str:
 def _configurar_codex() -> str:
     """Usa tu sesión de Codex CLI (sin clave de API): habla directo contra
     el endpoint que usa el propio Codex CLI, no contra la CLI en sí, así
-    que no hace falta tenerla instalada — solo haber hecho `codex login`
-    alguna vez (el archivo de sesión queda en ~/.codex/auth.json)."""
+    que no hace falta tenerla instalada para usar Jarvis — solo para hacer
+    login. Si no hay sesión, Jarvis mismo la dispara.
+
+    A diferencia de Claude Code, Codex CLI SÍ tiene un subcomando directo
+    para loguearse: `codex login` (confirmado con `codex --help` en esta
+    máquina). Igual que con Claude, se lanza como subproceso heredando
+    stdin/stdout/stderr del usuario, porque el flujo abre el navegador para
+    el OAuth y necesita esa interacción; Jarvis espera a que termine y
+    verifica con ``_hay_sesion_codex()`` si la sesión quedó activa (el
+    archivo de sesión queda en ~/.codex/auth.json)."""
     if not _hay_sesion_codex():
-        raise RuntimeError(
-            "Todavía no iniciaste sesión en Codex. Ejecuta `codex login` (instala antes "
-            "Codex CLI si falta: npm install -g @openai/codex) y volvé a intentar."
+        print(
+            "No encuentro una sesión de Codex. Voy a ejecutar `codex login`: "
+            "completa el inicio de sesión en el navegador que se abra."
         )
+        try:
+            subprocess.run(["codex", "login"])
+        except OSError as error:
+            raise RuntimeError(
+                f"No pude ejecutar `codex login` ({error}). ¿Está instalado Codex CLI? "
+                "Instalalo con: npm install -g @openai/codex"
+            ) from error
+        if not _hay_sesion_codex():
+            raise RuntimeError(
+                "No quedó una sesión activa de Codex después de `codex login`. Volvé a "
+                "intentar: ejecuta python -m jarvis de nuevo y completá el inicio de "
+                "sesión."
+            )
     guardar_en_env("JARVIS_MOTOR", "codex")
     os.environ["JARVIS_MOTOR"] = "codex"
     print("(usando tu sesión de Codex; elección guardada en .env)")
@@ -425,13 +502,6 @@ def _hay_credenciales_api() -> bool:
     """Clave en el entorno o perfil guardado con `ant auth login`."""
     return bool(os.getenv("ANTHROPIC_API_KEY") or os.getenv("ANTHROPIC_AUTH_TOKEN")
                 or (Path.home() / ".config" / "anthropic").is_dir())
-
-
-def _proveedor_configurado() -> bool:
-    """¿Ya se eligió explícitamente un proveedor de IA (vía .env o el menú de
-    configuración) en algún arranque anterior? Cubre el caso de Ollama, que
-    no tiene una clave que revisar."""
-    return "JARVIS_PROVEEDOR" in os.environ
 
 
 if __name__ == "__main__":
