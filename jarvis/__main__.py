@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import argparse
 import os
-import shutil
 import subprocess
 import sys
 import threading
@@ -24,7 +23,13 @@ from .cerebro import Cerebro
 from .config import Config, guardar_en_env
 from .herramientas import Herramientas
 from .hud import Hud, HudNulo
-from .proveedores import AdaptadorAnthropic, AdaptadorOllama, listar_modelos_ollama
+from .proveedores import (
+    AdaptadorAnthropic,
+    AdaptadorCodexResponses,
+    AdaptadorOllama,
+    MODELO_CODEX_POR_DEFECTO,
+    listar_modelos_ollama,
+)
 
 SALIR = {"salir", "cerrar", "cierra", "adiós", "adios", "exit", "quit"}
 
@@ -150,8 +155,8 @@ def _bucle_conversacion(args, config: Config, cerebro, hud: HudNulo) -> int:
             respuesta = "Estoy recibiendo demasiadas peticiones. Inténtelo en un momento."
         except anthropic.APIStatusError as error:
             respuesta = f"La API devolvió un error ({error.status_code})."
-        except OSError as error:  # típico si Ollama no está corriendo o no responde
-            respuesta = f"No consigo hablar con el modelo local ({error})."
+        except OSError as error:  # típico de Ollama (no está corriendo) o de Codex (red, sesión vencida)
+            respuesta = f"No consigo hablar con el proveedor de IA ({error})."
         except Exception as error:  # errores del modo suscripción (Claude Code)
             if type(error).__module__.split(".")[0] != "claude_agent_sdk":
                 raise
@@ -190,7 +195,8 @@ def _decir(texto: str, habla, hud: HudNulo, oido=None) -> None:
 
 def _crear_cerebro(config: Config, forzar_menu: bool = False):
     """Elige cómo conectar con un modelo de IA: Ollama en local, Claude por
-    suscripción (Claude Code) o Codex/OpenAI por suscripción (Codex CLI).
+    suscripción (Claude Code) o Codex/OpenAI con la sesión de Codex CLI
+    (vía el puerto ``ProveedorIA``, igual que Anthropic/Ollama).
     ``forzar_menu=True`` (``--reconfigurar-ia``) ignora lo que ya hay
     configurado y vuelve a preguntar.
 
@@ -229,9 +235,11 @@ def _crear_cerebro(config: Config, forzar_menu: bool = False):
         print("(usando tu suscripción de Claude a través de Claude Code)")
         return CerebroSuscripcion(config, herramientas)
     if motor == "codex":
-        from .cerebro_codex import CerebroCodex
-        print("(usando tu sesión de Codex CLI)")
-        return CerebroCodex(config, herramientas)
+        print("(usando tu sesión de Codex)")
+        adaptador = AdaptadorCodexResponses()  # valida la sesión (RuntimeError si no hay o venció)
+        if config.modelo == Config().modelo:  # nadie fijó JARVIS_MODELO a mano
+            config.modelo = MODELO_CODEX_POR_DEFECTO
+        return Cerebro(config, herramientas, adaptador)
     if motor != "api":
         raise RuntimeError(f"JARVIS_MOTOR no válido: {config.motor} (usa api, suscripcion, codex o auto)")
     adaptador = _crear_adaptador(config)
@@ -240,8 +248,10 @@ def _crear_cerebro(config: Config, forzar_menu: bool = False):
 
 def _crear_adaptador(config: Config):
     """Construye el adaptador de IA (puerto ``ProveedorIA``) según
-    ``config.proveedor``. Solo cubre los dos casos que no dependen de una
-    sesión externa: Anthropic con clave directa (sin menú) y Ollama local."""
+    ``config.proveedor``: Anthropic con clave directa (sin menú) u Ollama
+    local. Codex no es un ``proveedor`` bajo ``motor=api``: tiene su propio
+    valor de ``motor`` (``motor=codex``), igual que la suscripción, porque
+    no usa clave sino la sesión de Codex CLI — ver ``_crear_cerebro``."""
     if config.proveedor == "anthropic":
         if not _hay_credenciales_api():
             raise RuntimeError("Falta la clave de Claude. Copia .env.example como .env y pon tu ANTHROPIC_API_KEY.")
@@ -340,14 +350,15 @@ def _configurar_claude() -> str:
 
 
 def _configurar_codex() -> str:
-    """Usa tu sesión de Codex CLI (sin clave de API)."""
-    if shutil.which("codex") is None:
-        raise RuntimeError(
-            "Falta Codex CLI. Instálalo con: npm install -g @openai/codex\n"
-            "Después, ejecuta `codex login` e inicia sesión con tu cuenta."
-        )
+    """Usa tu sesión de Codex CLI (sin clave de API): habla directo contra
+    el endpoint que usa el propio Codex CLI, no contra la CLI en sí, así
+    que no hace falta tenerla instalada — solo haber hecho `codex login`
+    alguna vez (el archivo de sesión queda en ~/.codex/auth.json)."""
     if not _hay_sesion_codex():
-        raise RuntimeError("Todavía no iniciaste sesión en Codex. Ejecuta `codex login` y volvé a intentar.")
+        raise RuntimeError(
+            "Todavía no iniciaste sesión en Codex. Ejecuta `codex login` (instala antes "
+            "Codex CLI si falta: npm install -g @openai/codex) y volvé a intentar."
+        )
     guardar_en_env("JARVIS_MOTOR", "codex")
     os.environ["JARVIS_MOTOR"] = "codex"
     print("(usando tu sesión de Codex; elección guardada en .env)")

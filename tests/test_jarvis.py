@@ -366,6 +366,30 @@ def test_auto_sin_clave_usa_suscripcion(monkeypatch, tmp_path):
     cerebro.cerrar()
 
 
+def test_auto_sin_clave_ni_sesion_claude_usa_codex(monkeypatch, tmp_path):
+    """Si no hay clave ni sesión de Claude pero sí sesión de Codex, el modo
+    auto arma el Cerebro con el adaptador de Codex directamente (motor
+    propio `codex`, no `proveedor=codex` bajo `motor=api`)."""
+    from jarvis.__main__ import _crear_cerebro
+    from jarvis.cerebro import Cerebro
+    from jarvis.proveedores import AdaptadorCodexResponses, MODELO_CODEX_POR_DEFECTO
+
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("ANTHROPIC_AUTH_TOKEN", raising=False)
+    monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+    monkeypatch.setattr("jarvis.__main__._hay_sesion_claude", lambda: False)
+    monkeypatch.setattr("jarvis.__main__._hay_sesion_codex", lambda: True)
+    monkeypatch.setattr(
+        "jarvis.__main__.AdaptadorCodexResponses", lambda: AdaptadorCodexResponses(token="tok-falso")
+    )
+
+    cerebro = _crear_cerebro(Config(carpeta_datos=tmp_path))
+
+    assert isinstance(cerebro, Cerebro)
+    assert isinstance(cerebro.proveedor, AdaptadorCodexResponses)
+    assert cerebro.config.modelo == MODELO_CODEX_POR_DEFECTO
+
+
 def test_auto_sin_clave_ni_sesion_pide_menu(monkeypatch, tmp_path):
     from jarvis.__main__ import _crear_cerebro
 
@@ -405,38 +429,28 @@ def test_menu_conexion_opcion_claude_sin_sesion_falla(monkeypatch):
         _menu_conexion_ia()
 
 
-def test_menu_conexion_opcion_codex_persiste_motor_sin_clave(monkeypatch, tmp_path):
-    """Codex se conecta con la sesión de Codex CLI: el menú no pide ni
-    guarda ninguna clave, solo el motor elegido."""
+def test_menu_conexion_opcion_codex_persiste_proveedor_sin_clave(monkeypatch, tmp_path):
+    """Codex habla directo contra el endpoint de Responses API con la
+    sesión de Codex CLI: el menú no pide ni guarda ninguna clave, y no
+    hace falta tener la CLI instalada (solo haber hecho codex login)."""
     from jarvis.__main__ import _menu_conexion_ia
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr("builtins.input", lambda _="": "3")
-    monkeypatch.setattr("jarvis.__main__.shutil.which", lambda _cmd: "/usr/local/bin/codex")
     monkeypatch.setattr("jarvis.__main__._hay_sesion_codex", lambda: True)
 
     assert _menu_conexion_ia() == "codex"
     assert os.environ["JARVIS_MOTOR"] == "codex"
     env = (tmp_path / ".env").read_text()
     assert "JARVIS_MOTOR=codex" in env
+    assert "JARVIS_PROVEEDOR" not in env
     assert "OPENAI_API_KEY" not in env and "sk-" not in env
-
-
-def test_menu_conexion_opcion_codex_sin_cli_instalada_falla(monkeypatch):
-    from jarvis.__main__ import _menu_conexion_ia
-
-    monkeypatch.setattr("builtins.input", lambda _="": "3")
-    monkeypatch.setattr("jarvis.__main__.shutil.which", lambda _cmd: None)
-
-    with pytest.raises(RuntimeError, match="Codex CLI"):
-        _menu_conexion_ia()
 
 
 def test_menu_conexion_opcion_codex_sin_sesion_falla(monkeypatch):
     from jarvis.__main__ import _menu_conexion_ia
 
     monkeypatch.setattr("builtins.input", lambda _="": "3")
-    monkeypatch.setattr("jarvis.__main__.shutil.which", lambda _cmd: "/usr/local/bin/codex")
     monkeypatch.setattr("jarvis.__main__._hay_sesion_codex", lambda: False)
 
     with pytest.raises(RuntimeError, match="sesión en Codex"):
