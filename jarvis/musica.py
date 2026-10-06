@@ -43,8 +43,12 @@ def registrar_musica(h: "Herramientas", clave_youtube: str) -> None:
 
         parametros = urllib.parse.urlencode({"search_query": busqueda})
         webbrowser.open(f"{URL_RESULTADOS}?{parametros}")
-        extra = "" if clave_youtube else " (sin YOUTUBE_API_KEY configurada, elige el usuario)"
-        return f"Abiertos los resultados de YouTube para «{busqueda}»{extra}."
+        if clave_youtube:
+            return f"Abiertos los resultados de YouTube para «{busqueda}»."
+        return (
+            f"Abiertos los resultados de YouTube para «{busqueda}», sin reproducir "
+            "directo: no hay YOUTUBE_API_KEY configurada."
+        )
 
 
 def _buscar_primer_video(busqueda: str, clave: str) -> str | None:

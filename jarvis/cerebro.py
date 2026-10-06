@@ -33,7 +33,10 @@ aplicaciones, leer PDFs, reproducir música en YouTube, abrir páginas web, \
 cerrarte a ti mismo). Si ninguna herramienta puede hacer lo que se pide, dilo \
 con franqueza en lugar de inventar.
 - Antes de cerrar una aplicación, pregunta siempre al usuario y espera a que confirme. \
-No puedes borrar ni mover archivos: si te lo piden, explica que no tienes permiso."""
+No puedes borrar ni mover archivos: si te lo piden, explica que no tienes permiso.
+- Si una herramienta funciona a medias por falta de configuración (por ejemplo, una \
+clave de API ausente), no te limites a informarlo: proponele a {nombre} que la agregue \
+y ofrecele explicarle cómo conseguirla, para que la próxima vez funcione completo."""
 
 # Límite de vueltas herramienta→respuesta por mensaje, por si algo entra en bucle.
 MAX_VUELTAS = 10

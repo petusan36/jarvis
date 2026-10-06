@@ -24,7 +24,7 @@ def test_sin_clave_abre_resultados_de_busqueda(monkeypatch, musica):
     assert len(abiertas) == 1
     assert "youtube.com/results" in abiertas[0]
     assert "Bohemian+Rhapsody" in abiertas[0] or "Bohemian%20Rhapsody" in abiertas[0]
-    assert "sin YOUTUBE_API_KEY" in salida
+    assert "YOUTUBE_API_KEY" in salida
 
 
 def test_con_clave_y_resultado_reproduce_directo(monkeypatch, tmp_path):
@@ -38,7 +38,7 @@ def test_con_clave_y_resultado_reproduce_directo(monkeypatch, tmp_path):
     assert not error
     assert len(abiertas) == 1
     assert "watch?v=abc123" in abiertas[0] and "autoplay=1" in abiertas[0]
-    assert "sin YOUTUBE_API_KEY" not in salida
+    assert "YOUTUBE_API_KEY" not in salida
 
 
 def test_con_clave_pero_api_falla_cae_a_resultados(monkeypatch, tmp_path):
