@@ -30,14 +30,48 @@ def test_sin_memoria_no_registra_la_herramienta(tmp_path):
     assert h.memoria is None
 
 
-def test_con_memoria_registra_recordar_y_delega(tmp_path):
+def test_recordar_sin_confirmar_queda_pendiente_y_no_escribe(tmp_path):
+    """Gate de autorización: sin esto, una instrucción inyectada (ej. desde
+    una página web que Jarvis lea) podría escribir en memoria permanente sin
+    que el usuario lo viera ni lo aprobara."""
     memoria = _MemoriaFalsa()
     h = Herramientas(tmp_path, sistema=False, memoria=memoria)
 
     assert "recordar" in {d["name"] for d in h.definiciones()}
 
     salida, es_error = h.ejecutar(
-        "recordar", {"hecho": "genero de musica preferido", "valor": "rock"}
+        "recordar", {"hecho": "genero de musica preferido", "valor": "rock", "confirmado": False}
+    )
+
+    assert not es_error
+    assert "pendiente" in salida.lower()
+    assert memoria.guardados == []
+
+
+def test_recordar_confirmado_en_mismo_turno_no_escribe(tmp_path):
+    """Solo vale una confirmación dada en un mensaje POSTERIOR a la
+    petición — igual que cerrar_aplicacion."""
+    memoria = _MemoriaFalsa()
+    h = Herramientas(tmp_path, sistema=False, memoria=memoria)
+
+    h.ejecutar("recordar", {"hecho": "genero", "valor": "rock", "confirmado": False})
+    salida, es_error = h.ejecutar(
+        "recordar", {"hecho": "genero", "valor": "rock", "confirmado": True}
+    )
+
+    assert not es_error
+    assert "pendiente" in salida.lower()
+    assert memoria.guardados == []
+
+
+def test_recordar_confirmado_en_turno_posterior_escribe(tmp_path):
+    memoria = _MemoriaFalsa()
+    h = Herramientas(tmp_path, sistema=False, memoria=memoria)
+
+    h.ejecutar("recordar", {"hecho": "genero de musica preferido", "valor": "rock", "confirmado": False})
+    h.nuevo_turno()
+    salida, es_error = h.ejecutar(
+        "recordar", {"hecho": "genero de musica preferido", "valor": "rock", "confirmado": True}
     )
 
     assert not es_error

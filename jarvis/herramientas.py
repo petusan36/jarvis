@@ -153,6 +153,14 @@ class Herramientas:
             return "Cerrando Jarvis."
 
     def _registrar_memoria(self, memoria: "PuertoMemoria") -> None:
+        # Escrituras pendientes de confirmar: (hecho, valor) → turno en que se pidieron.
+        # Mismo patrón que cerrar_aplicacion (ver sistema.py): sin esto, cualquier
+        # instrucción inyectada (p. ej. desde una página web o un PDF que Jarvis lea)
+        # podía hacer que el modelo grabara algo en memoria permanente sin que el
+        # usuario lo viera ni lo aprobara — y esa memoria se re-inyecta en el
+        # system prompt de TODAS las conversaciones futuras (ver _contexto_memoria).
+        pendientes: dict[tuple[str, str], int] = {}
+
         @self.registrar(
             "recordar",
             "Guarda en la memoria permanente de Jarvis un hecho sobre el usuario "
@@ -161,7 +169,9 @@ class Herramientas:
             "anterior (por ejemplo, un cambio de preferencia), el anterior queda "
             "reemplazado automáticamente, sin quedar contradictorio. Úsala solo cuando el "
             "usuario comparta algo que valga la pena recordar a futuro, no para cada dato "
-            "suelto de la conversación.",
+            "suelto de la conversación. Llámala primero con confirmado=false: eso deja el "
+            "guardado pendiente. Dile al usuario qué vas a recordar y espera su respuesta. "
+            "Solo si en su siguiente mensaje confirma, vuelve a llamarla con confirmado=true.",
             {
                 "hecho": {
                     "type": "string",
@@ -171,9 +181,22 @@ class Herramientas:
                     "type": "string",
                     "description": "El valor del hecho, p. ej. 'rock'.",
                 },
+                "confirmado": {
+                    "type": "boolean",
+                    "description": "true solo si el usuario ya confirmó que quiere que se guarde esto.",
+                },
             },
         )
-        def recordar(hecho: str, valor: str) -> str:
+        def recordar(hecho: str, valor: str, confirmado: bool) -> str:
+            clave = (hecho.strip().lower(), valor.strip().lower())
+            pedido_en = pendientes.get(clave)
+            # Solo vale una confirmación dada en un mensaje posterior a la petición.
+            if not confirmado or pedido_en is None or pedido_en >= self.turno:
+                pendientes.setdefault(clave, self.turno)
+                return (f"Guardar «{hecho}: {valor}» en memoria, pendiente de confirmar. "
+                        "Pregúntale al usuario si quiere que lo recuerdes y espera su "
+                        "respuesta antes de llamar de nuevo con confirmado=true.")
+            del pendientes[clave]
             return memoria.recordar(hecho, valor)
 
     def _ruta_notas(self) -> Path:
