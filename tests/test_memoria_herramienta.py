@@ -97,6 +97,28 @@ def test_recordar_confirmado_en_turno_posterior_con_si_escribe(tmp_path):
     assert memoria.guardados == [("genero de musica preferido", "rock")]
 
 
+def test_recordar_reintentos_fallidos_no_renuevan_la_ventana(tmp_path):
+    """Si cada intento de confirmado=true sin un sí real corriera la
+    ventana "turno siguiente" hacia adelante, el modelo podía reintentar
+    todos los turnos hasta que el usuario dijera "sí" por cualquier otro
+    motivo. El turno del pedido original NO debe renovarse con reintentos."""
+    memoria = _MemoriaFalsa()
+    h = Herramientas(tmp_path, sistema=False, memoria=memoria)
+
+    h.ejecutar("recordar", {"hecho": "genero", "valor": "rock", "confirmado": False})
+    for _ in range(3):
+        h.nuevo_turno("¿qué tal el clima?")
+        h.ejecutar("recordar", {"hecho": "genero", "valor": "rock", "confirmado": True})
+    h.nuevo_turno("sí, dale")  # el usuario por fin dice algo afirmativo, pero tarde
+    salida, es_error = h.ejecutar(
+        "recordar", {"hecho": "genero", "valor": "rock", "confirmado": True}
+    )
+
+    assert not es_error
+    assert "pendiente" in salida.lower()
+    assert memoria.guardados == []
+
+
 def test_recordar_si_en_turno_no_inmediato_no_escribe(tmp_path):
     """La confirmación tiene que atarse al pedido concreto: un pendiente
     viejo no debe quedar esperando cualquier "sí" futuro, de cualquier

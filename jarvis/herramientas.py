@@ -234,11 +234,14 @@ class Herramientas:
                 and pedido_en == self.turno - 1 \
                 and _suena_afirmativo(self.ultimo_mensaje_usuario)
             if not confirmacion_real:
-                # Un pedido no confirmado en el turno siguiente expira: no
-                # queda pendiente "para siempre" esperando que coincida con
-                # cualquier sí futuro de otro tema.
-                pendientes.pop(clave, None)
-                pendientes[clave] = self.turno
+                # setdefault, NO reemplazo incondicional: si ya hay un pedido
+                # pendiente para esta clave, su turno original NO se renueva.
+                # Sin esto, el modelo podía reintentar confirmado=true en
+                # cada turno sucesivo hasta que el usuario dijera "sí" por
+                # cualquier motivo no relacionado — cada intento fallido
+                # corría la ventana "turno siguiente" hacia adelante, así
+                # que la ataba al pedido original dejaba de servir de nada.
+                pendientes.setdefault(clave, self.turno)
                 return (f"Guardar «{hecho}: {valor}» en memoria, pendiente de confirmar. "
                         "Pregúntale al usuario si quiere que lo recuerdes y esperá su "
                         "respuesta antes de llamar de nuevo con confirmado=true.")
