@@ -193,6 +193,22 @@ def _decir(texto: str, habla, hud: HudNulo, oido=None) -> None:
     hud.estado("reposo")
 
 
+def _crear_memoria(config: Config):
+    """Construye el adaptador de memoria permanente (graphiti + ladybug +
+    Ollama). Importado de forma perezosa: si ``memoria_habilitada`` es
+    False (comportamiento por defecto), estas dependencias pesadas nunca
+    se cargan."""
+    from .memoria import AdaptadorMemoriaGraphiti
+
+    return AdaptadorMemoriaGraphiti(
+        config.carpeta_datos / "memoria",
+        ollama_url=config.ollama_url,
+        modelo_llm=config.memoria_modelo_llm,
+        modelo_embedding=config.memoria_modelo_embedding,
+        ventana_gracia_dias=config.memoria_ventana_gracia_dias,
+    )
+
+
 def _crear_cerebro(config: Config, forzar_menu: bool = False):
     """Elige cómo conectar con un modelo de IA: Ollama en local, Claude por
     suscripción (Claude Code) o Codex/OpenAI con la sesión de Codex CLI
@@ -206,7 +222,11 @@ def _crear_cerebro(config: Config, forzar_menu: bool = False):
     La única clave que Jarvis todavía puede usar es ANTHROPIC_API_KEY si
     ya está en el entorno (uso directo de la API, sin pasar por ningún
     menú — comportamiento previo a todo esto, sin cambios)."""
-    herramientas = Herramientas(config.carpeta_datos, youtube_api_key=config.youtube_api_key)
+    herramientas = Herramientas(
+        config.carpeta_datos,
+        youtube_api_key=config.youtube_api_key,
+        memoria=_crear_memoria(config) if config.memoria_habilitada else None,
+    )
     motor = config.motor
     if forzar_menu:
         if not sys.stdin.isatty():

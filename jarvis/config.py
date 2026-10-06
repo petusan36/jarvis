@@ -68,6 +68,10 @@ class Config:
     elevenlabs_voz: str = ""
     elevenlabs_modelo: str = ""
     youtube_api_key: str = ""  # opcional: sin ella, "reproducir música" abre los resultados y elige el usuario
+    memoria_habilitada: bool = False  # memoria permanente (ver jarvis.memoria); requiere ollama + nomic-embed-text
+    memoria_modelo_llm: str = "qwen3:8b"  # modelo de Ollama para extracción de entidades (graphiti)
+    memoria_modelo_embedding: str = "nomic-embed-text"
+    memoria_ventana_gracia_dias: int = 180  # cuánto tardan los hechos invalidados en archivarse en frío
 
     @classmethod
     def desde_entorno(cls) -> "Config":
@@ -94,4 +98,11 @@ class Config:
             elevenlabs_voz=os.getenv("JARVIS_ELEVENLABS_VOZ", base.elevenlabs_voz),
             elevenlabs_modelo=os.getenv("JARVIS_ELEVENLABS_MODELO", base.elevenlabs_modelo),
             youtube_api_key=os.getenv("YOUTUBE_API_KEY", base.youtube_api_key),
+            memoria_habilitada=os.getenv("JARVIS_MEMORIA", "1" if base.memoria_habilitada else "0").lower()
+            in ("1", "true", "si", "sí"),
+            memoria_modelo_llm=os.getenv("JARVIS_MEMORIA_MODELO_LLM", base.memoria_modelo_llm),
+            memoria_modelo_embedding=os.getenv("JARVIS_MEMORIA_MODELO_EMBEDDING", base.memoria_modelo_embedding),
+            memoria_ventana_gracia_dias=int(
+                os.getenv("JARVIS_MEMORIA_VENTANA_GRACIA_DIAS", base.memoria_ventana_gracia_dias)
+            ),
         )

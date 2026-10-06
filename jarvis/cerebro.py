@@ -33,7 +33,11 @@ aplicaciones, leer PDFs, reproducir música en YouTube, abrir páginas web, \
 cerrarte a ti mismo). Si ninguna herramienta puede hacer lo que se pide, dilo \
 con franqueza en lugar de inventar.
 - Antes de cerrar una aplicación, pregunta siempre al usuario y espera a que confirme. \
-No puedes borrar ni mover archivos: si te lo piden, explica que no tienes permiso."""
+No puedes borrar ni mover archivos: si te lo piden, explica que no tienes permiso.
+- Si el usuario comparte algo sobre sí mismo que valga la pena recordar a futuro \
+(preferencias, datos personales, rutinas...), usa la herramienta "recordar" para \
+guardarlo. No lo hagas en silencio: solo invocando la herramienta, que el usuario puede \
+ver en la conversación."""
 
 # Límite de vueltas herramienta→respuesta por mensaje, por si algo entra en bucle.
 MAX_VUELTAS = 10
@@ -51,11 +55,14 @@ class Cerebro:
         """Envía un mensaje del usuario y devuelve la respuesta final en texto."""
         self.herramientas.nuevo_turno()
         self.historial.append(TurnoUsuario(texto=texto_usuario))
+        sistema = INSTRUCCIONES.format(nombre=self.config.nombre_usuario) + _contexto_memoria(
+            self.herramientas.memoria, texto_usuario
+        )
 
         for _ in range(MAX_VUELTAS):
             respuesta = self.proveedor.responder(
                 mensajes=self.historial,
-                sistema=INSTRUCCIONES.format(nombre=self.config.nombre_usuario),
+                sistema=sistema,
                 herramientas=self.herramientas.definiciones(),
                 modelo=self.config.modelo,
                 max_tokens=self.config.max_tokens,
@@ -92,3 +99,18 @@ class Cerebro:
 
 def _texto(contenido: list[Any]) -> str:
     return "".join(b.texto for b in contenido if isinstance(b, BloqueTexto)).strip()
+
+
+def _contexto_memoria(memoria: Any, texto_usuario: str) -> str:
+    """Hechos relevantes de la memoria permanente (ver ``jarvis.memoria``),
+    listos para anexar a ``INSTRUCCIONES``. Devuelve cadena vacía si no hay
+    memoria configurada o no encontró nada relevante: no se pide
+    autorización para leer memoria (solo para escribirla, vía la
+    herramienta "recordar"), así que esto puede hacerse en cada turno."""
+    if memoria is None:
+        return ""
+    hechos = memoria.contexto_relevante(texto_usuario)
+    if not hechos:
+        return ""
+    lista = "\n".join(f"- {hecho}" for hecho in hechos)
+    return f"\n\nHechos que recuerdas sobre el usuario de conversaciones anteriores:\n{lista}"

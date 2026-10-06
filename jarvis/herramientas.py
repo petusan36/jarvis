@@ -13,7 +13,10 @@ import operator
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any, Callable
+
+if TYPE_CHECKING:
+    from .memoria.puerto import PuertoMemoria
 
 
 @dataclass
@@ -41,13 +44,24 @@ class Herramienta:
 class Herramientas:
     """Registro de herramientas disponibles para una sesión."""
 
-    def __init__(self, carpeta_datos: Path, sistema: bool = True, youtube_api_key: str = ""):
+    def __init__(
+        self,
+        carpeta_datos: Path,
+        sistema: bool = True,
+        youtube_api_key: str = "",
+        memoria: "PuertoMemoria | None" = None,
+    ):
         self.carpeta_datos = carpeta_datos
         self._registro: dict[str, Herramienta] = {}
         # Cuenta los mensajes del usuario; sirve para exigir confirmaciones en un mensaje aparte.
         self.turno = 0
         # El bucle principal revisa esto después de cada respuesta para saber si debe terminar.
         self.salir_pedido = False
+        # Puerto de memoria permanente (ver jarvis.memoria). Si es None, la
+        # herramienta "recordar" no se registra y Cerebro no inyecta
+        # contexto de memoria en el prompt: Jarvis sigue funcionando igual
+        # que antes de esta tarea.
+        self.memoria = memoria
         self._registrar_basicas()
         if sistema:
             from .sistema import registrar_sistema
@@ -56,6 +70,8 @@ class Herramientas:
         registrar_musica(self, youtube_api_key)
         from .web import registrar_web
         registrar_web(self)
+        if memoria is not None:
+            self._registrar_memoria(memoria)
 
     def nuevo_turno(self) -> None:
         """Avisa de que ha llegado un mensaje nuevo del usuario."""
@@ -135,6 +151,30 @@ class Herramientas:
         def cerrar_jarvis() -> str:
             self.salir_pedido = True
             return "Cerrando Jarvis."
+
+    def _registrar_memoria(self, memoria: "PuertoMemoria") -> None:
+        @self.registrar(
+            "recordar",
+            "Guarda en la memoria permanente de Jarvis un hecho sobre el usuario "
+            "(preferencias, datos personales, rutinas...) para recordarlo en futuras "
+            "conversaciones, incluso después de cerrar Jarvis. Si el hecho actualiza uno "
+            "anterior (por ejemplo, un cambio de preferencia), el anterior queda "
+            "reemplazado automáticamente, sin quedar contradictorio. Úsala solo cuando el "
+            "usuario comparta algo que valga la pena recordar a futuro, no para cada dato "
+            "suelto de la conversación.",
+            {
+                "hecho": {
+                    "type": "string",
+                    "description": "Qué tipo de hecho es, en pocas palabras, p. ej. 'género de música preferido'.",
+                },
+                "valor": {
+                    "type": "string",
+                    "description": "El valor del hecho, p. ej. 'rock'.",
+                },
+            },
+        )
+        def recordar(hecho: str, valor: str) -> str:
+            return memoria.recordar(hecho, valor)
 
     def _ruta_notas(self) -> Path:
         return self.carpeta_datos / "notas.json"
