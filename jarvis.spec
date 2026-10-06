@@ -112,8 +112,15 @@ elif sys.platform == "win32":
 else:
     hiddenimports += ["pyttsx3.drivers.espeak"]
 
-# --- Datos propios de jarvis: la página del HUD (hud.html) ----------------
-datas += [("jarvis/hud/hud.html", "jarvis/hud")]
+# --- Datos propios de jarvis: páginas HTML servidas por los servidores
+# locales (HUD y menú de conexión). menu.html se agregó en una rama distinta
+# a la del empaquetado standalone y el merge nunca sincronizó este spec —
+# por eso el .app crasheaba (silencioso, sin terminal) apenas intentaba abrir
+# la ventana del menú sin tty: importlib.resources no encontraba el archivo. --
+datas += [
+    ("jarvis/hud/hud.html", "jarvis/hud"),
+    ("jarvis/hud/menu.html", "jarvis/hud"),
+]
 
 a = Analysis(
     ["scripts/jarvis_entry.py"],
