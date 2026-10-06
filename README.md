@@ -243,19 +243,52 @@ Chrome instalado, como pestaña del navegador.
 
 ## App de escritorio
 
+El ícono de escritorio es una copia **standalone** de Jarvis, construida con
+[PyInstaller](https://pyinstaller.org/): no depende de este repo, de este
+venv ni de ningún Python instalado en el sistema para arrancar. Si movés o
+borrás el repo clonado, el ícono sigue funcionando — la copia instalada ya
+tiene adentro todo lo que necesita (intérprete, torch, el motor de voz, etc).
+
+### 1. Construir el bundle (una vez por sistema)
+
+```bash
+pip install -e ".[build]"   # instala PyInstaller (herramienta de build, no de runtime)
+scripts/build_app.sh        # tarda varios minutos la primera vez
+```
+
+Esto genera:
+
+- macOS: `dist/Jarvis.app`
+- Windows/Linux: `dist/jarvis/` (carpeta con `jarvis.exe` o el binario `jarvis` adentro)
+
+PyInstaller **no cruza plataformas**: un build hecho en Mac solo corre en
+Mac. Para generar los otros dos, o corré `scripts/build_app.sh` (Linux) /
+`pyinstaller --noconfirm --clean jarvis.spec` (Windows, desde PowerShell) en
+esa máquina, o descargá el artifact ya construido del workflow de CI
+(`.github/workflows/build-app.yml`, corre en una matriz de runners macOS +
+Windows + Linux y sube cada bundle como artifact de GitHub Actions).
+
+**Tamaño aproximado:** el bundle pesa alrededor de **1 GB** (torch y
+transformers, que usa Kokoro para el TTS, son el grueso). Los modelos de voz
+en sí — Whisper ("small", ~500 MB) y las voces de Kokoro/Piper — **no están
+embebidos**: se descargan solos la primera vez que se usan, igual que
+corriendo desde el repo (ver tabla de abajo).
+
+### 2. Instalar el ícono de escritorio
+
 ```bash
 python -m jarvis --instalar-app
 ```
 
-Crea un ícono de doble clic que abre Jarvis en modo completo (voz + HUD), sin
-ventana de terminal: la salida queda en `~/.jarvis/jarvis.log` en vez de en
-pantalla.
+Copia el bundle ya construido (paso 1) al lugar de escritorio de cada
+sistema. Si todavía no corriste `scripts/build_app.sh`, este comando falla
+con un mensaje claro pidiendo que lo corras primero.
 
-| Sistema | Dónde queda |
-|---|---|
-| macOS | `~/Applications/Jarvis.app` (Finder, Launchpad, Spotlight) |
-| Windows | Menú Inicio → Jarvis |
-| Linux | menú de aplicaciones del escritorio (`~/.local/share/applications`) |
+| Sistema | Dónde queda | Qué copia |
+|---|---|---|
+| macOS | `~/Applications/Jarvis.app` (Finder, Launchpad, Spotlight) | `dist/Jarvis.app` completo |
+| Windows | Menú Inicio → Jarvis (lanza `jarvis.exe` directo, sin consola) | `dist/jarvis/` a `%LOCALAPPDATA%\Jarvis\app` |
+| Linux | menú de aplicaciones del escritorio (`~/.local/share/applications`) | `dist/jarvis/` a `~/.local/share/jarvis/app` |
 
 Importante:
 
@@ -263,14 +296,25 @@ Importante:
   mostrando el menú en una ventana nativa en vez de una terminal (ver más
   arriba) — requiere PyObjC instalado, igual que la ventana flotante del HUD.
   En Windows y Linux el ícono todavía no tiene ventana propia para esto: ahí
-  seguí usando `python -m jarvis` desde una terminal para la primera conexión
-  o para cambiar de proveedor.
+  seguí usando el binario del bundle (o `python -m jarvis`) desde una
+  terminal para la primera conexión o para cambiar de proveedor.
 - **macOS puede avisar "desarrollador no identificado"** la primera vez que
   abras el ícono (no está firmado ni notarizado): clic derecho → Abrir, o
   `xattr -d com.apple.quarantine ~/Applications/Jarvis.app`.
-- No hay ícono con arte personalizado ni desinstalador todavía — borrar el
-  ícono a mano (`rm -rf ~/Applications/Jarvis.app` en macOS, el `.bat` o el
-  `.desktop` en Windows/Linux) alcanza para quitarlo.
+- No hay ícono con arte personalizado ni desinstalador todavía — borrar la
+  carpeta instalada a mano alcanza para quitarlo (`rm -rf
+  ~/Applications/Jarvis.app` en macOS; `%LOCALAPPDATA%\Jarvis` + el `.bat`
+  del menú Inicio en Windows; `~/.local/share/jarvis` + el `.desktop` en
+  Linux).
+- Dónde se descargan los modelos en el primer uso real (sin cambios respecto
+  a correr desde el repo):
+
+  | Modelo | Carpeta |
+  |---|---|
+  | Whisper (voz → texto, `faster-whisper`) | caché de huggingface (`~/.cache/huggingface`) |
+  | Kokoro (texto → voz) | caché de huggingface (`~/.cache/huggingface`) |
+  | Piper (texto → voz, alternativa) | `~/.jarvis/voces` |
+
 - Este paso prepara el terreno para que la animación HUD, más adelante, flote
   directamente en el escritorio en vez de abrirse en una pestaña del navegador.
 

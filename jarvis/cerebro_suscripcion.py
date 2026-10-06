@@ -37,7 +37,7 @@ class CerebroSuscripcion:
         self._cliente = cliente
 
     def responder(self, texto_usuario: str) -> str:
-        self.herramientas.nuevo_turno()
+        self.herramientas.nuevo_turno(texto_usuario)
         return self._bucle.run_until_complete(self._responder(texto_usuario))
 
     def olvidar(self) -> None:

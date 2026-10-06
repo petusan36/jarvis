@@ -31,6 +31,9 @@ MANIFEST
 #   before PyInstaller builds the exe, so as to inject date/other infos into it.
 *.manifest
 *.spec
+# jarvis.spec SÍ se versiona: está escrito a mano (ver scripts/build_app.sh),
+# no es un archivo autogenerado efímero.
+!jarvis.spec
 
 # Installer logs
 pip-log.txt
