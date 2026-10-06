@@ -52,9 +52,17 @@ def _suena_afirmativo(mensaje: str) -> bool:
     frecuentes en español, no un modelo): alcanza para bloquear una
     confirmación que el usuario nunca escribió, que es lo que importa acá
     — no se busca distinguir matices, solo exigir ALGO que de verdad
-    parezca un sí antes de escribir en memoria permanente."""
+    parezca un sí antes de escribir en memoria permanente.
+
+    Mira SOLO la primera palabra, nunca "¿aparece en algún lugar del
+    mensaje?": un mensaje como "no, dale, mejor cancelá" contiene "dale"
+    (está en la lista) pero no es un sí — es justo lo contrario. Buscar la
+    palabra en cualquier posición abría ese bypass."""
     palabras = mensaje.strip(".,!¿?¡ ").lower().split()
-    return any(p.strip(".,!¿?¡") in _PALABRAS_AFIRMATIVAS for p in palabras)
+    if not palabras:
+        return False
+    primera = palabras[0].strip(".,!¿?¡")
+    return primera in _PALABRAS_AFIRMATIVAS
 
 
 class Herramientas:
@@ -214,15 +222,23 @@ class Herramientas:
         def recordar(hecho: str, valor: str, confirmado: bool) -> str:
             clave = (hecho.strip().lower(), valor.strip().lower())
             pedido_en = pendientes.get(clave)
-            # Dos condiciones, no una: que haya pasado un turno real desde el
-            # pedido, Y que lo que el usuario escribió en ese turno suene a un
-            # sí — "confirmado=true" por sí solo es lo que dice el MODELO, no
-            # prueba que el usuario haya dicho nada; sin este segundo chequeo,
-            # un mensaje inyectado podía hacer que el modelo se auto-confirmara.
-            confirmacion_real = confirmado and pedido_en is not None and pedido_en < self.turno \
+            # Tres condiciones, no una: que el pedido sea justo del turno
+            # ANTERIOR (no "en algún momento antes" — un pendiente viejo
+            # colgado ahí podía quedar satisfecho por un "sí" de otro tema,
+            # en otro turno, meses después: la confirmación no estaba atada
+            # al pedido concreto); que lo que el usuario escribió en ese
+            # turno exacto suene a un sí; y que "confirmado=true" lo diga el
+            # modelo (no prueba nada por sí solo, es la entrada que controla
+            # el modelo, no el usuario — por eso las otras dos condiciones).
+            confirmacion_real = confirmado and pedido_en is not None \
+                and pedido_en == self.turno - 1 \
                 and _suena_afirmativo(self.ultimo_mensaje_usuario)
             if not confirmacion_real:
-                pendientes.setdefault(clave, self.turno)
+                # Un pedido no confirmado en el turno siguiente expira: no
+                # queda pendiente "para siempre" esperando que coincida con
+                # cualquier sí futuro de otro tema.
+                pendientes.pop(clave, None)
+                pendientes[clave] = self.turno
                 return (f"Guardar «{hecho}: {valor}» en memoria, pendiente de confirmar. "
                         "Pregúntale al usuario si quiere que lo recuerdes y esperá su "
                         "respuesta antes de llamar de nuevo con confirmado=true.")

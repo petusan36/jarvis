@@ -97,6 +97,43 @@ def test_recordar_confirmado_en_turno_posterior_con_si_escribe(tmp_path):
     assert memoria.guardados == [("genero de musica preferido", "rock")]
 
 
+def test_recordar_si_en_turno_no_inmediato_no_escribe(tmp_path):
+    """La confirmación tiene que atarse al pedido concreto: un pendiente
+    viejo no debe quedar esperando cualquier "sí" futuro, de cualquier
+    tema, turnos después."""
+    memoria = _MemoriaFalsa()
+    h = Herramientas(tmp_path, sistema=False, memoria=memoria)
+
+    h.ejecutar("recordar", {"hecho": "genero", "valor": "rock", "confirmado": False})
+    h.nuevo_turno("¿y mañana va a llover?")  # turno +1, no confirma nada
+    h.nuevo_turno("sí")  # turno +2: afirmativo, pero ya no es el turno siguiente al pedido
+    salida, es_error = h.ejecutar(
+        "recordar", {"hecho": "genero", "valor": "rock", "confirmado": True}
+    )
+
+    assert not es_error
+    assert "pendiente" in salida.lower()
+    assert memoria.guardados == []
+
+
+def test_recordar_negacion_que_contiene_palabra_afirmativa_no_escribe(tmp_path):
+    """"no, dale, mejor cancelá" contiene "dale" (está en la lista de
+    afirmaciones) pero el sentido real es un no — mirar solo la primera
+    palabra evita este bypass."""
+    memoria = _MemoriaFalsa()
+    h = Herramientas(tmp_path, sistema=False, memoria=memoria)
+
+    h.ejecutar("recordar", {"hecho": "genero", "valor": "rock", "confirmado": False})
+    h.nuevo_turno("no, dale, mejor cancelá eso")
+    salida, es_error = h.ejecutar(
+        "recordar", {"hecho": "genero", "valor": "rock", "confirmado": True}
+    )
+
+    assert not es_error
+    assert "pendiente" in salida.lower()
+    assert memoria.guardados == []
+
+
 def test_contexto_memoria_vacio_sin_memoria():
     assert _contexto_memoria(None, "cualquier cosa") == ""
 
