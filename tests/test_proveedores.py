@@ -10,14 +10,17 @@ import pytest
 
 from jarvis.proveedores import (
     AdaptadorAnthropic,
+    AdaptadorCodexResponses,
     AdaptadorOllama,
     BloqueTexto,
     BloqueUsoHerramienta,
+    ResultadoHerramienta,
     TurnoAsistente,
+    TurnoResultadoHerramienta,
     TurnoUsuario,
     listar_modelos_ollama,
 )
-from jarvis.proveedores._comun import herramienta_a_function_calling
+from jarvis.proveedores._comun import herramienta_a_function_calling, herramienta_a_responses_api
 
 HERRAMIENTAS = [
     {
@@ -205,3 +208,190 @@ def test_listar_modelos_ollama_sin_servidor_corriendo(monkeypatch):
 
     with pytest.raises(OSError):
         listar_modelos_ollama()
+
+
+# --- AdaptadorCodexResponses -------------------------------------------------
+
+def test_herramienta_a_responses_api_traduce_el_esquema_plano():
+    traducida = herramienta_a_responses_api(HERRAMIENTAS[0])
+    assert traducida == {
+        "type": "function",
+        "name": "calcular",
+        "description": "Evalúa una expresión matemática.",
+        "parameters": HERRAMIENTAS[0]["input_schema"],
+        "strict": True,
+    }
+    assert "function" not in traducida  # a diferencia del formato de Chat Completions/Ollama
+
+
+class _RespuestaSSEFalsa:
+    """Imita lo que devuelve urlopen cuando se itera línea por línea un
+    stream de Server-Sent Events."""
+
+    def __init__(self, lineas: list[bytes]):
+        self._lineas = lineas
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_exc):
+        return False
+
+    def __iter__(self):
+        return iter(self._lineas)
+
+
+def _sse(eventos: list[dict]) -> list[bytes]:
+    lineas = []
+    for evento in eventos:
+        lineas.append(f"data: {json.dumps(evento)}\n".encode())
+        lineas.append(b"\n")
+    return lineas
+
+
+def test_adaptador_codex_responder_texto(monkeypatch):
+    peticiones = []
+
+    def abrir_falso(peticion, timeout=None):
+        peticiones.append(peticion)
+        return _RespuestaSSEFalsa(_sse([
+            {"type": "response.output_text.delta", "delta": "Son "},
+            {"type": "response.output_text.delta", "delta": "42."},
+            {"type": "response.output_text.done", "text": "Son 42, señor."},
+            {"type": "response.completed", "response": {"status": "completed"}},
+        ]))
+
+    adaptador = AdaptadorCodexResponses(token="tok-123", abrir=abrir_falso)
+    respuesta = adaptador.responder(**_kwargs_comunes())
+
+    assert respuesta.detenida_por == "texto"
+    assert respuesta.contenido == [BloqueTexto(texto="Son 42, señor.")]
+
+    peticion = peticiones[0]
+    assert peticion.full_url == "https://chatgpt.com/backend-api/codex/responses"
+    assert peticion.get_header("Authorization") == "Bearer tok-123"
+    cuerpo = json.loads(peticion.data)
+    assert cuerpo["model"] == "algun-modelo"
+    assert cuerpo["instructions"] == "Sos Jarvis."
+    assert cuerpo["store"] is False and cuerpo["stream"] is True
+    assert cuerpo["input"] == [{"role": "user", "content": "¿Cuánto es 6 por 7?"}]
+    assert cuerpo["tools"][0] == {
+        "type": "function", "name": "calcular",
+        "description": "Evalúa una expresión matemática.",
+        "parameters": HERRAMIENTAS[0]["input_schema"], "strict": True,
+    }
+
+
+def test_adaptador_codex_responder_con_herramienta():
+    def abrir_falso(peticion, timeout=None):
+        return _RespuestaSSEFalsa(_sse([
+            {"type": "response.output_item.added",
+             "item": {"id": "item_1", "type": "function_call", "call_id": "call_abc", "name": "calcular"}},
+            {"type": "response.function_call_arguments.done",
+             "item_id": "item_1", "arguments": json.dumps({"expresion": "6*7"})},
+            {"type": "response.completed", "response": {"status": "completed"}},
+        ]))
+
+    adaptador = AdaptadorCodexResponses(token="tok-123", abrir=abrir_falso)
+    respuesta = adaptador.responder(**_kwargs_comunes())
+
+    assert respuesta.detenida_por == "herramienta"
+    assert respuesta.contenido == [BloqueUsoHerramienta(id="call_abc", nombre="calcular", entrada={"expresion": "6*7"})]
+
+
+def test_adaptador_codex_respuesta_incompleta_es_longitud():
+    def abrir_falso(peticion, timeout=None):
+        return _RespuestaSSEFalsa(_sse([
+            {"type": "response.output_text.done", "text": "cortad"},
+            {"type": "response.completed", "response": {"status": "incomplete"}},
+        ]))
+
+    adaptador = AdaptadorCodexResponses(token="tok-123", abrir=abrir_falso)
+    respuesta = adaptador.responder(**_kwargs_comunes())
+
+    assert respuesta.detenida_por == "longitud"
+
+
+def test_adaptador_codex_reconstruye_turnos_sin_bruto():
+    """Sin 'store' server-side, cada llamada manda la conversación
+    completa: un turno de usuario, uno de asistente que llamó una
+    herramienta, y el resultado de esa herramienta."""
+    peticiones = []
+
+    def abrir_falso(peticion, timeout=None):
+        peticiones.append(peticion)
+        return _RespuestaSSEFalsa(_sse([
+            {"type": "response.output_text.done", "text": "listo"},
+            {"type": "response.completed", "response": {"status": "completed"}},
+        ]))
+
+    mensajes = [
+        TurnoUsuario(texto="¿Cuánto es 6 por 7?"),
+        TurnoAsistente(contenido=[BloqueUsoHerramienta(id="call_abc", nombre="calcular", entrada={"expresion": "6*7"})]),
+        TurnoResultadoHerramienta(resultados=[ResultadoHerramienta(id_uso="call_abc", contenido="42", es_error=False)]),
+    ]
+    adaptador = AdaptadorCodexResponses(token="tok-123", abrir=abrir_falso)
+    adaptador.responder(**{**_kwargs_comunes(), "mensajes": mensajes})
+
+    cuerpo = json.loads(peticiones[0].data)
+    assert cuerpo["input"] == [
+        {"role": "user", "content": "¿Cuánto es 6 por 7?"},
+        {"type": "function_call", "call_id": "call_abc", "name": "calcular", "arguments": '{"expresion": "6*7"}'},
+        {"type": "function_call_output", "call_id": "call_abc", "output": "42"},
+    ]
+
+
+def test_adaptador_codex_error_401_pide_relogin():
+    import urllib.error
+
+    def abrir_falso(peticion, timeout=None):
+        raise urllib.error.HTTPError(peticion.full_url, 401, "Unauthorized", {}, __import__("io").BytesIO(b"{}"))
+
+    adaptador = AdaptadorCodexResponses(token="tok-vencido", abrir=abrir_falso)
+    with pytest.raises(OSError, match="codex login"):
+        adaptador.responder(**_kwargs_comunes())
+
+
+def test_adaptador_codex_error_400_incluye_el_mensaje_de_la_api():
+    import io
+    import urllib.error
+
+    def abrir_falso(peticion, timeout=None):
+        cuerpo = json.dumps({"error": {"message": "Store must be set to false"}}).encode()
+        raise urllib.error.HTTPError(peticion.full_url, 400, "Bad Request", {}, io.BytesIO(cuerpo))
+
+    adaptador = AdaptadorCodexResponses(token="tok-123", abrir=abrir_falso)
+    with pytest.raises(OSError, match="Store must be set to false"):
+        adaptador.responder(**_kwargs_comunes())
+
+
+def test_adaptador_codex_sin_conexion_lanza_oserror():
+    import urllib.error
+
+    def abrir_falso(peticion, timeout=None):
+        raise urllib.error.URLError("conexión rechazada")
+
+    adaptador = AdaptadorCodexResponses(token="tok-123", abrir=abrir_falso)
+    with pytest.raises(OSError):
+        adaptador.responder(**_kwargs_comunes())
+
+
+def test_adaptador_codex_evento_de_error_en_el_stream():
+    def abrir_falso(peticion, timeout=None):
+        return _RespuestaSSEFalsa(_sse([
+            {"type": "response.failed", "response": {"error": {"message": "algo se rompió"}}},
+        ]))
+
+    adaptador = AdaptadorCodexResponses(token="tok-123", abrir=abrir_falso)
+    with pytest.raises(OSError, match="algo se rompió"):
+        adaptador.responder(**_kwargs_comunes())
+
+
+def test_adaptador_codex_usa_leer_token_si_no_se_inyecta(monkeypatch):
+    monkeypatch.setattr("jarvis.proveedores.codex_responses_adaptador.leer_token_codex", lambda: "tok-del-disco")
+
+    def abrir_falso(peticion, timeout=None):
+        assert peticion.get_header("Authorization") == "Bearer tok-del-disco"
+        return _RespuestaSSEFalsa(_sse([{"type": "response.completed", "response": {"status": "completed"}}]))
+
+    AdaptadorCodexResponses(abrir=abrir_falso).responder(**_kwargs_comunes())

@@ -233,3 +233,7 @@ __marimo__/
 .remember/
 .claude
 .mcp.json
+.atl/
+
+#ides
+.vscode/

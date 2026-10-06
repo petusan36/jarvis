@@ -45,8 +45,11 @@ def guardar_en_env(clave: str, valor: str, ruta: Path = Path(".env")) -> None:
 
 @dataclass
 class Config:
-    motor: str = "auto"  # api | suscripcion | auto (API si hay clave, si no la suscripción)
-    proveedor: str = "anthropic"  # anthropic | openai | ollama (solo aplica con motor=api)
+    motor: str = "auto"  # api | suscripcion | codex | auto
+    # api: proveedor-con-clave (ver `proveedor`); suscripcion: Claude Code (Agent SDK);
+    # codex: sesión de Codex CLI (endpoint interno de ChatGPT, sin clave); auto: detecta
+    # entre las tres según qué haya configurado/disponible.
+    proveedor: str = "anthropic"  # anthropic | ollama (solo aplica con motor=api)
     modelo: str = "claude-opus-5-5"
     ollama_url: str = "http://localhost:11434"  # base de la API local, si proveedor=ollama
     esfuerzo: str = "low"  # low | medium | high: "low" responde más rápido, ideal para voz
