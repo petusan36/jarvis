@@ -423,7 +423,7 @@ def test_menu_proveedor_nube_opcion_anthropic_persiste_motor_sin_clave(monkeypat
     guarda ninguna clave, solo el motor elegido."""
     from jarvis.__main__ import _menu_proveedor_nube
 
-    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("jarvis.config._RUTA_ENV_POR_DEFECTO", tmp_path / ".env")
     monkeypatch.setattr("builtins.input", lambda _="": "2")
     monkeypatch.setattr("jarvis.__main__._hay_sesion_claude", lambda: True)
 
@@ -440,7 +440,7 @@ def test_menu_proveedor_nube_opcion_openai_persiste_proveedor_sin_clave(monkeypa
     hace falta tener la CLI instalada (solo haber hecho codex login)."""
     from jarvis.__main__ import _menu_proveedor_nube
 
-    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("jarvis.config._RUTA_ENV_POR_DEFECTO", tmp_path / ".env")
     monkeypatch.setattr("builtins.input", lambda _="": "1")
     monkeypatch.setattr("jarvis.__main__._hay_sesion_codex", lambda: True)
 
@@ -587,7 +587,7 @@ def test_configurar_codex_sin_cli_instalada_falla_con_mensaje_claro(monkeypatch)
 def test_menu_conexion_opcion_local_lista_y_persiste_modelo(monkeypatch, tmp_path):
     from jarvis.__main__ import _menu_conexion_ia
 
-    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("jarvis.config._RUTA_ENV_POR_DEFECTO", tmp_path / ".env")
     monkeypatch.setattr("jarvis.__main__.listar_modelos_ollama", lambda: ["qwen3:8b", "qwen3-vl:4b"])
     entradas = iter(["1", "1"])  # 1) modelo local -> 1) qwen3:8b
     monkeypatch.setattr("builtins.input", lambda _="": next(entradas))
