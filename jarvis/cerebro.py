@@ -53,7 +53,7 @@ class Cerebro:
 
     def responder(self, texto_usuario: str) -> str:
         """Envía un mensaje del usuario y devuelve la respuesta final en texto."""
-        self.herramientas.nuevo_turno()
+        self.herramientas.nuevo_turno(texto_usuario)
         self.historial.append(TurnoUsuario(texto=texto_usuario))
         sistema = INSTRUCCIONES.format(nombre=self.config.nombre_usuario) + _contexto_memoria(
             self.herramientas.memoria, texto_usuario

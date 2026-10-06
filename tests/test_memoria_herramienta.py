@@ -64,12 +64,30 @@ def test_recordar_confirmado_en_mismo_turno_no_escribe(tmp_path):
     assert memoria.guardados == []
 
 
-def test_recordar_confirmado_en_turno_posterior_escribe(tmp_path):
+def test_recordar_confirmado_en_turno_posterior_sin_mensaje_afirmativo_no_escribe(tmp_path):
+    """El flag confirmado=true lo pone el MODELO, no el usuario: sin chequear
+    lo que el usuario escribió de verdad, un mensaje inyectado podía hacer
+    que el modelo se auto-confirmara sin que nadie dijera que sí."""
+    memoria = _MemoriaFalsa()
+    h = Herramientas(tmp_path, sistema=False, memoria=memoria)
+
+    h.ejecutar("recordar", {"hecho": "genero", "valor": "rock", "confirmado": False})
+    h.nuevo_turno("¿y mañana va a llover?")  # turno posterior, pero no es un sí
+    salida, es_error = h.ejecutar(
+        "recordar", {"hecho": "genero", "valor": "rock", "confirmado": True}
+    )
+
+    assert not es_error
+    assert "pendiente" in salida.lower()
+    assert memoria.guardados == []
+
+
+def test_recordar_confirmado_en_turno_posterior_con_si_escribe(tmp_path):
     memoria = _MemoriaFalsa()
     h = Herramientas(tmp_path, sistema=False, memoria=memoria)
 
     h.ejecutar("recordar", {"hecho": "genero de musica preferido", "valor": "rock", "confirmado": False})
-    h.nuevo_turno()
+    h.nuevo_turno("sí, dale")
     salida, es_error = h.ejecutar(
         "recordar", {"hecho": "genero de musica preferido", "valor": "rock", "confirmado": True}
     )
