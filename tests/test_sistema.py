@@ -274,6 +274,18 @@ def test_escribir_archivo_rechaza_library(sistema):
     assert error
 
 
+def test_escribir_archivo_rechaza_library_sin_importar_mayusculas(sistema):
+    """Hallazgo real: APFS/HFS+ (el filesystem por defecto de macOS) es
+    insensible a mayúsculas — "library" y "Library" son la misma carpeta
+    en disco, aunque "library" == "Library" sea False en Python. El primer
+    intento de este fix comparaba sin casefold y quedaba bypasseable con
+    cualquier variación de mayúsculas."""
+    salida, error = _escribir_confirmado(sistema, "library/LaunchAgents/evil.plist", "<xml/>")
+    assert error
+    salida, error = _escribir_confirmado(sistema, "LIBRARY/LaunchAgents/evil.plist", "<xml/>")
+    assert error
+
+
 # --- abrir_aplicacion con ruta ----------------------------------------------
 
 def test_abrir_aplicacion_sin_ruta_igual_que_antes(sistema):

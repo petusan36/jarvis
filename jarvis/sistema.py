@@ -46,7 +46,10 @@ EXTENSIONES_EJECUTABLES = {".command", ".sh", ".tool", ".terminal", ".scpt", ".w
 # dotfile/dot-carpeta (.ssh, .zshrc, .bash_profile, .config...): escribir ahí
 # equivale a ejecutar código (un LaunchAgent, una rc de shell, una clave SSH),
 # el mismo nivel de riesgo que ejecutar_comando pero sin su confirmación.
-CARPETAS_PROHIBIDAS_ESCRITURA = {"Library"}
+# casefold, no el nombre tal cual: el filesystem de macOS por defecto
+# (APFS/HFS+) es insensible a mayúsculas — "library" y "Library" son la
+# MISMA carpeta en disco, aunque "library" == "Library" sea False en Python.
+CARPETAS_PROHIBIDAS_ESCRITURA = {"library"}
 
 CARPETAS_EN_ESPANOL = {
     "escritorio": "Desktop", "documentos": "Documents", "descargas": "Downloads",
@@ -75,7 +78,7 @@ def registrar_sistema(h: "Herramientas", carpeta_personal: Path | None = None,
 
     def rechazar_ruta_sensible(destino: Path) -> None:
         partes = destino.relative_to(raiz).parts
-        if any(p.startswith(".") for p in partes) or (partes and partes[0] in CARPETAS_PROHIBIDAS_ESCRITURA):
+        if any(p.startswith(".") for p in partes) or (partes and partes[0].casefold() in CARPETAS_PROHIBIDAS_ESCRITURA):
             raise PermissionError(
                 "por seguridad no escribo ahí: ni dotfiles/dot-carpetas (.ssh, .zshrc, ...) "
                 "ni dentro de Library — equivale a ejecutar código sin tu confirmación real"
