@@ -205,7 +205,6 @@ class MotorKokoro:
         if not trozos:
             return
         audio = _quitar_clics(self.np.concatenate(trozos), self.np, self.frecuencia)
-        audio = _recortar_cola_fantasma(audio, self.np, self.frecuencia)
         self.sd.play(audio, self.frecuencia, latency=LATENCIA_SALIDA)
         self.sd.wait()
 
@@ -226,48 +225,6 @@ def _quitar_clics(audio, np, frecuencia: int, umbral: float = 0.3, ventana_ms: f
     for i in saltos:
         inicio, fin = max(0, i - medio), min(len(audio), i + medio + 1)
         audio[inicio:fin] = np.linspace(audio[inicio], audio[fin - 1], fin - inicio)
-    return audio
-
-
-def _recortar_cola_fantasma(audio, np, frecuencia: int, silencio_minimo_ms: float = 20.0,
-                             umbral_habla: float = 0.30, umbral_silencio: float = 0.10):
-    """Corta una ráfaga fantasma que Kokoro a veces agrega después de terminar de
-    hablar en español: el predictor de duración no está bien entrenado para ese
-    idioma y deja un eco corto de fonemas sin sentido tras el silencio real de
-    cierre. Medido empíricamente: tras el último tramo de habla fuerte, el audio
-    cae a silencio (<10% del pico) y luego vuelve a subir brevemente (~25-30% del
-    pico) antes de apagarse del todo — esa segunda subida es la ráfaga a cortar.
-
-    Se busca a partir del ÚLTIMO punto de habla fuerte (``umbral_habla``), no desde
-    el principio: así no se confunde con una pausa legítima entre oraciones de una
-    respuesta larga, que siempre está seguida de más habla fuerte real."""
-    if len(audio) == 0:
-        return audio
-    tam_ventana = max(1, int(frecuencia * 0.01))  # 10ms
-    num_ventanas = len(audio) // tam_ventana
-    if num_ventanas == 0:
-        return audio
-    energias = np.array(
-        [np.abs(audio[i * tam_ventana:(i + 1) * tam_ventana]).mean() for i in range(num_ventanas)]
-    )
-    pico = energias.max()  # pico de energía por ventana, no de una muestra suelta
-    if pico == 0:
-        return audio
-    energias = energias / pico
-    fuertes = np.where(energias > umbral_habla)[0]
-    if len(fuertes) == 0:
-        return audio
-    ancla = fuertes[-1]
-    ventanas_necesarias = max(1, round(silencio_minimo_ms / 10))
-    consecutivas = 0
-    for i in range(ancla + 1, num_ventanas):
-        if energias[i] < umbral_silencio:
-            consecutivas += 1
-            if consecutivas >= ventanas_necesarias:
-                corte = (i - ventanas_necesarias + 1) * tam_ventana
-                return audio[:corte]
-        else:
-            consecutivas = 0
     return audio
 
 
