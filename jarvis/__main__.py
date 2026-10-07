@@ -127,7 +127,10 @@ def _ejecutar(args, config: Config, cerebro) -> int:
         resultado = {}
 
         def trabajo() -> None:
-            resultado["codigo"] = _bucle_conversacion(args, config, cerebro, hud)
+            resultado["codigo"] = _bucle_conversacion(
+                args, config, cerebro, hud,
+                al_dormir=ventana_macos.ocultar_ventana, al_despertar=ventana_macos.mostrar_ventana,
+            )
 
         ventana_macos.ejecutar_con_ventana_flotante(ventana_nativa_url, trabajo)
         return resultado.get("codigo", 0)
@@ -135,7 +138,12 @@ def _ejecutar(args, config: Config, cerebro) -> int:
     return _bucle_conversacion(args, config, cerebro, hud)
 
 
-def _bucle_conversacion(args, config: Config, cerebro, hud: HudNulo, oido=None, habla=None) -> int:
+def _bucle_conversacion(args, config: Config, cerebro, hud: HudNulo, oido=None, habla=None,
+                        al_dormir=lambda: None, al_despertar=lambda: None) -> int:
+    """``al_dormir``/``al_despertar``: ganchos opcionales para el modo de
+    escucha pasiva (ver jarvis.voz.oido.Oido.dormir y la herramienta
+    "dormir_jarvis") — en modo ventana nativa, ocultan/muestran la ventana
+    del HUD; en cualquier otro caso quedan en no-op."""
     modo_voz = not args.texto
     if modo_voz:
         if oido is None:
@@ -144,7 +152,9 @@ def _bucle_conversacion(args, config: Config, cerebro, hud: HudNulo, oido=None, 
             oido = Oido(config.modelo_whisper, config.idioma, hud, pulsar=args.pulsar,
                         palabra_activacion=config.palabra_activacion,
                         sensibilidad=config.sensibilidad_voz,
-                        verificador=verificador, referencia_voz=referencia_voz)
+                        verificador=verificador, referencia_voz=referencia_voz,
+                        segundos_reposo_inactividad=config.segundos_reposo_inactividad,
+                        al_dormir=al_dormir, al_despertar=al_despertar)
         if not args.silencio and habla is None:
             from .voz.habla import crear_habla
             try:
@@ -197,6 +207,10 @@ def _bucle_conversacion(args, config: Config, cerebro, hud: HudNulo, oido=None, 
                 raise
             respuesta = f"No consigo hablar con Claude Code: {error}"
         _decir(respuesta, habla, hud, oido)
+        if cerebro.herramientas.dormir_pedido:
+            if oido:
+                oido.dormir()
+            cerebro.herramientas.dormir_pedido = False
         if cerebro.herramientas.salir_pedido:
             break
 

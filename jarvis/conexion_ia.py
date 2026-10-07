@@ -75,6 +75,7 @@ def _crear_cerebro(config: Config, forzar_menu: bool = False):
         config.carpeta_datos,
         youtube_api_key=config.youtube_api_key,
         memoria=_crear_memoria(config) if config.memoria_habilitada else None,
+        config=config,
     )
     if sys.stdin.isatty():
         # Hay una terminal real (ej. corriste `python -m jarvis` a mano): el

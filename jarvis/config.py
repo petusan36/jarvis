@@ -50,7 +50,17 @@ def guardar_en_env(clave: str, valor: str, ruta: Path | None = None) -> None:
     en el directorio de trabajo: se resuelve en el cuerpo de la función (no
     como valor por defecto del parámetro) para que un test pueda
     monkeypatchear ``_RUTA_ENV_POR_DEFECTO`` y que surta efecto — un default
-    de parámetro queda fijo en el momento en que se define la función."""
+    de parámetro queda fijo en el momento en que se define la función.
+
+    Rechaza un salto de línea en ``clave`` o ``valor``: el formato de .env es
+    una línea CLAVE=valor por entrada, así que un salto de línea en el valor
+    inyectaría líneas nuevas — pisando cualquier otra variable, incluida
+    ANTHROPIC_API_KEY — en vez de quedar contenido en esta. Defensa en
+    profundidad: quien llama (p. ej. la herramienta "guardar_nombre", con un
+    valor que en última instancia decide el modelo) debería validar esto
+    también, pero esta función no confía en que lo haya hecho."""
+    if "\n" in clave or "\r" in clave or "\n" in valor or "\r" in valor:
+        raise ValueError("clave o valor con salto de línea: no se puede guardar en .env")
     if ruta is None:
         ruta = _RUTA_ENV_POR_DEFECTO
     ruta.parent.mkdir(parents=True, exist_ok=True)
@@ -95,7 +105,7 @@ class Config:
     elevenlabs_voz: str = ""
     elevenlabs_modelo: str = ""
     youtube_api_key: str = ""  # opcional: sin ella, "reproducir música" abre los resultados y elige el usuario
-    memoria_habilitada: bool = False  # memoria permanente (ver jarvis.memoria); requiere ollama + nomic-embed-text
+    memoria_habilitada: bool = True  # memoria permanente (ver jarvis.memoria); requiere ollama + nomic-embed-text
     memoria_modelo_llm: str = "qwen3:8b"  # modelo de Ollama para extracción de entidades (graphiti)
     memoria_modelo_embedding: str = "nomic-embed-text"
     memoria_ventana_gracia_dias: int = 180  # cuánto tardan los hechos invalidados en archivarse en frío
@@ -103,6 +113,11 @@ class Config:
     # voz enrolada (--enrolar-voz), no exige nada, igual que siempre.
     reconocimiento_voz_habilitado: bool = True
     umbral_voz_dueño: float = 0.75
+    # Modo de escucha pasiva (ver jarvis.voz.oido.Oido.dormir): tras este
+    # tiempo sin una frase real dirigida a Jarvis, entra solo en reposo y
+    # solo vuelve a atender si lo nombrás. 0 desactiva el reposo automático
+    # (el pedido explícito con la herramienta "dormir_jarvis" sigue andando).
+    segundos_reposo_inactividad: float = 300.0
 
     @classmethod
     def desde_entorno(cls) -> "Config":
@@ -140,4 +155,7 @@ class Config:
                 "JARVIS_VOZ_RECONOCIMIENTO", "1" if base.reconocimiento_voz_habilitado else "0"
             ).lower() in ("1", "true", "si", "sí"),
             umbral_voz_dueño=float(os.getenv("JARVIS_VOZ_UMBRAL", base.umbral_voz_dueño)),
+            segundos_reposo_inactividad=float(
+                os.getenv("JARVIS_REPOSO_INACTIVIDAD_SEGUNDOS", base.segundos_reposo_inactividad)
+            ),
         )

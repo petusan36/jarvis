@@ -22,6 +22,7 @@ from ..hud import HudNulo
 
 FRECUENCIA = 16000  # Whisper trabaja a 16 kHz mono
 BLOQUE = 480  # 30 ms por bloque de audio
+PALABRA_DESPERTAR = "jarvis"  # en modo reposo, hace falta nombrarlo aunque no haya palabra_activacion
 
 # Frases que Whisper "oye" a veces en el ruido o el silencio (alucinaciones típicas).
 ALUCINACIONES = {
@@ -83,7 +84,8 @@ class DetectorVoz:
 class Oido:
     def __init__(self, modelo: str = "small", idioma: str = "es", hud: HudNulo | None = None,
                  pulsar: bool = False, palabra_activacion: str = "", sensibilidad: float = 3.0,
-                 verificador=None, referencia_voz=None):
+                 verificador=None, referencia_voz=None, segundos_reposo_inactividad: float = 0.0,
+                 al_dormir=lambda: None, al_despertar=lambda: None):
         try:
             from faster_whisper import WhisperModel
         except ImportError as error:
@@ -108,6 +110,44 @@ class Oido:
         # Lo deja escrito escuchar() después de cada frase, para que quien
         # llame (ver jarvis.__main__) sepa si la voz coincidió con la dueña.
         self.es_dueño = True
+        # Modo de escucha pasiva ("dormir_jarvis", ver herramientas.py): en
+        # reposo, hace falta nombrarlo (PALABRA_DESPERTAR) aunque no haya
+        # palabra_activacion configurada. al_dormir/al_despertar son ganchos
+        # opcionales (p. ej. ocultar/mostrar la ventana nativa del HUD) que
+        # no sabe nada de AppKit ni de nada — se los inyecta quien construye
+        # el Oido (ver jarvis.__main__._ejecutar).
+        self.en_reposo = False
+        self.segundos_reposo_inactividad = segundos_reposo_inactividad
+        self.al_dormir = al_dormir
+        self.al_despertar = al_despertar
+        self._temporizador_reposo: threading.Timer | None = None
+        self._reiniciar_temporizador_reposo()
+
+    def dormir(self) -> None:
+        """Entra en modo de escucha pasiva ya mismo (pedido explícito, ver
+        la herramienta "dormir_jarvis") o porque venció el temporizador de
+        inactividad. Idempotente: si ya estaba dormido, no hace nada de
+        nuevo (no vuelve a llamar a al_dormir)."""
+        if self.en_reposo:
+            return
+        self.en_reposo = True
+        if self._temporizador_reposo is not None:
+            self._temporizador_reposo.cancel()
+        self.al_dormir()
+
+    def _despertar(self) -> None:
+        self.en_reposo = False
+        self.al_despertar()
+        self._reiniciar_temporizador_reposo()
+
+    def _reiniciar_temporizador_reposo(self) -> None:
+        if self._temporizador_reposo is not None:
+            self._temporizador_reposo.cancel()
+        if self.segundos_reposo_inactividad <= 0:
+            return
+        self._temporizador_reposo = threading.Timer(self.segundos_reposo_inactividad, self.dormir)
+        self._temporizador_reposo.daemon = True
+        self._temporizador_reposo.start()
 
     def escuchar(self) -> str:
         """Espera a que el usuario diga algo y devuelve el texto transcrito."""
@@ -118,8 +158,13 @@ class Oido:
             self.es_dueño = self._coincide_con_dueño(audio) if audio is not None else True
             if self.pulsar:
                 return texto
-            texto = filtrar_palabra_activacion(texto, self.palabra_activacion)
+            palabra = self.palabra_activacion or (PALABRA_DESPERTAR if self.en_reposo else "")
+            texto = filtrar_palabra_activacion(texto, palabra)
             if texto:
+                if self.en_reposo:
+                    self._despertar()
+                else:
+                    self._reiniciar_temporizador_reposo()
                 return texto
             # Ruido, una alucinación de Whisper o no iba dirigido a Jarvis: seguir escuchando.
 
