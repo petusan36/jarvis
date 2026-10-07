@@ -84,6 +84,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     config = Config.desde_entorno()
+    _redirigir_log_si_es_bundle_standalone(config.carpeta_datos)
     if not _tomar_instancia_unica(config.carpeta_datos):
         print("Jarvis ya está abierto (otra instancia sigue corriendo).", file=sys.stderr)
         return 0
@@ -651,6 +652,25 @@ def _abrir_terminal_con_comando(comando: list[str]) -> None:
     guion = " ".join(shlex.quote(parte) for parte in comando)
     aplescript = f'tell application "Terminal" to do script "{guion}"'
     subprocess.run(["osascript", "-e", aplescript], timeout=10, check=True)
+
+
+def _redirigir_log_si_es_bundle_standalone(carpeta_datos: Path) -> None:
+    """El bundle standalone (PyInstaller, ver --instalar-app) se abre vía
+    LaunchServices (doble clic/`open`), sin terminal ni redirección propia
+    como tenía el lanzador fino viejo (que hacía `>> jarvis.log 2>&1` en el
+    script de escritorio) — sin esto, cualquier error quedaba invisible, sin
+    rastro en ningún lado, justo el bug reportado como "Jarvis abre un
+    momento y se cierra" sin poder diagnosticarlo.
+
+    ``sys.frozen`` solo es ``True`` dentro del bundle de PyInstaller — nunca
+    en desarrollo ni en los tests, así que esto no afecta `capsys` ni ningún
+    comportamiento existente fuera del bundle real."""
+    if not getattr(sys, "frozen", False):
+        return
+    carpeta_datos.mkdir(parents=True, exist_ok=True)
+    archivo_log = open(carpeta_datos / "jarvis.log", "a", buffering=1, encoding="utf-8")
+    sys.stdout = archivo_log
+    sys.stderr = archivo_log
 
 
 def _tomar_instancia_unica(carpeta_datos: Path) -> bool:
