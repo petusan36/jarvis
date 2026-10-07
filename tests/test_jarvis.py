@@ -482,6 +482,29 @@ def test_menu_siempre_corre_incluso_con_todo_configurado(monkeypatch, tmp_path):
     cerebro.cerrar()
 
 
+def test_crear_cerebro_guardar_nombre_se_ve_en_el_cerebro_de_la_misma_sesion(monkeypatch, tmp_path):
+    """Bug real confirmado en vivo: Herramientas se construía con el config
+    de ANTES del menú; Cerebro recibía uno NUEVO (Config.desde_entorno(),
+    después del menú) — dos objetos distintos. guardar_nombre mutaba el
+    viejo, que Cerebro ya no veía: quedaba bien guardado en .env, pero
+    Jarvis seguía despidiéndose con el nombre anterior en esa misma
+    sesión, hasta reiniciar el proceso."""
+    from jarvis.conexion_ia import _crear_cerebro
+
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.setattr("jarvis.conexion_ia._menu_conexion_ia", lambda: "api")
+    monkeypatch.setattr("jarvis.config._RUTA_ENV_POR_DEFECTO", tmp_path / ".env")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "prueba")
+    monkeypatch.setenv("JARVIS_CARPETA_DATOS", str(tmp_path))
+    monkeypatch.setenv("JARVIS_PROVEEDOR", "anthropic")
+
+    cerebro = _crear_cerebro(Config(carpeta_datos=tmp_path))
+    cerebro.herramientas.nuevo_turno("llamame Pedro")
+    cerebro.herramientas.ejecutar("guardar_nombre", {"nombre": "Pedro"})
+
+    assert cerebro.config.nombre_usuario == "Pedro"
+
+
 def test_sin_tty_no_puede_mostrar_el_menu(monkeypatch, tmp_path):
     from jarvis.conexion_ia import _crear_cerebro
 
