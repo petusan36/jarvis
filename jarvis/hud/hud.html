@@ -6,15 +6,11 @@
 <title>J.A.R.V.I.S.</title>
 <style>
   :root { --cian: #4fd8ff; --fondo: #02070d; }
-  html, body { margin: 0; height: 100%; background: var(--fondo); overflow: hidden;
+  html, body { margin: 0; height: 100%; background: transparent; overflow: hidden;
     font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif; color: var(--cian); }
   canvas { position: fixed; inset: 0; width: 100%; height: 100%; }
-  #panel { position: fixed; left: 0; right: 0; bottom: 6vh; text-align: center; pointer-events: none; }
-  #estado { font-size: 15px; letter-spacing: .6em; text-shadow: 0 0 12px var(--cian); }
-  #texto { margin: 14px auto 0; max-width: min(760px, 90vw); font-size: 17px; line-height: 1.45;
-    color: #bfefff; opacity: .85; min-height: 2.9em; }
-  #titulo { position: fixed; top: 4vh; left: 0; right: 0; text-align: center; font-size: 13px;
-    letter-spacing: .9em; opacity: .55; }
+  /* Flotando sobre el escritorio: sin texto, solo los anillos. */
+  #panel, #titulo { display: none; }
 </style>
 </head>
 <body>
@@ -141,8 +137,13 @@ function dibujar(ahora) {
   const respira = 1 + actual.pulso * Math.sin(t * 1.6) + energia * 0.06;
   const b = actual.brillo;
 
-  ctx.fillStyle = "rgba(2,7,13,0.35)";  // estela ligera en lugar de borrar del todo
+  // Estela ligera en lugar de borrar del todo, pero hacia transparente (no
+  // hacia negro): flotando sobre el escritorio, un velo oscuro taparía lo
+  // de atrás en vez de dejarlo transparente.
+  ctx.globalCompositeOperation = "destination-out";
+  ctx.fillStyle = "rgba(0,0,0,0.35)";
   ctx.fillRect(0, 0, w, h);
+  ctx.globalCompositeOperation = "source-over";
 
   ctx.save();
   ctx.translate(w / 2, h / 2 - h * 0.04);

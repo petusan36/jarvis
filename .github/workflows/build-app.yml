@@ -1,0 +1,85 @@
+name: Construir Jarvis standalone
+
+# PyInstaller no cruza plataformas: un build hecho en macOS solo corre en
+# macOS, uno de Windows solo en Windows, etc. Por eso esto corre en una
+# matriz de los 3 runners nativos de GitHub Actions, cada uno produciendo
+# el bundle de su propio sistema operativo con el mismo jarvis.spec.
+#
+# Esto NO verifica de forma automática que el bundle arranque de verdad
+# (no hay Ollama ni micrófono en el runner): solo confirma que el build de
+# PyInstaller termina sin errores y sube el resultado como artifact para
+# que alguien lo descargue y lo pruebe a mano. La verificación real de
+# arranque + independencia del repo en macOS se hizo manualmente (ver
+# README, sección "Instalar como app de escritorio").
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "jarvis/**"
+      - "jarvis.spec"
+      - "scripts/build_app.sh"
+      - "pyproject.toml"
+      - ".github/workflows/build-app.yml"
+  pull_request:
+    paths:
+      - "jarvis/**"
+      - "jarvis.spec"
+      - "scripts/build_app.sh"
+      - "pyproject.toml"
+      - ".github/workflows/build-app.yml"
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            nombre: macos
+            salida: dist/Jarvis.app
+          - os: windows-latest
+            nombre: windows
+            salida: dist/jarvis
+          - os: ubuntu-latest
+            nombre: linux
+            salida: dist/jarvis
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # Dependencias nativas que faster-whisper/sounddevice/kokoro
+      # necesitan en Linux y que en macOS/Windows ya vienen con las wheels.
+      - name: Dependencias nativas (Linux)
+        if: matrix.nombre == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y espeak-ng portaudio19-dev libsndfile1
+
+      - name: Instalar jarvis con el grupo "build"
+        run: pip install -e ".[build]"
+
+      - name: Construir con PyInstaller
+        run: pyinstaller --noconfirm --clean jarvis.spec
+
+      - name: Verificar que el bundle se generó
+        shell: bash
+        run: |
+          if [ ! -e "${{ matrix.salida }}" ]; then
+            echo "No se generó ${{ matrix.salida }}" >&2
+            exit 1
+          fi
+          du -sh "${{ matrix.salida }}" || true
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: jarvis-${{ matrix.nombre }}
+          path: ${{ matrix.salida }}
+          if-no-files-found: error
