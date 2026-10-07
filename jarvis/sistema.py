@@ -5,14 +5,26 @@ Pensadas para macOS (usan ``open`` y AppleScript). Por seguridad:
 
 - Solo trabajan dentro de la carpeta personal del usuario (archivos/carpetas;
   ``ejecutar_comando`` es la excepción deliberada — ver su propio docstring).
-- No hay ninguna herramienta para borrar ni mover archivos.
-- Cerrar una aplicación, y ejecutar un comando de shell, exigen que el
-  usuario lo confirme en un mensaje posterior: la primera llamada solo deja
-  la petición pendiente.
+- ``escribir_archivo`` rechaza dotfiles/dot-carpetas (.ssh, .zshrc...) y todo
+  lo que esté bajo ``Library`` — equivale a ejecutar código (una clave SSH,
+  un LaunchAgent) sin pasar por ``ejecutar_comando`` ni su confirmación.
+- Cerrar una aplicación, escribir un archivo, y ejecutar un comando de
+  shell, exigen que el usuario lo confirme en un mensaje posterior: la
+  primera llamada solo deja la petición pendiente.
+
+Límite conocido, no resuelto acá: la confirmación de estas tres la "ve" el
+usuario a través de lo que Jarvis le dice/muestra, que decide el modelo —
+no hay (todavía) un diálogo nativo fuera del control del modelo que
+garantice que lo mostrado es exactamente lo que se va a ejecutar/escribir.
+Mismo límite que ya tenían ``recordar``/``cerrar_aplicacion`` desde antes;
+se vuelve más relevante con ``ejecutar_comando`` por el alcance (cualquier
+comando, no limitado a la carpeta personal). Un diálogo nativo (fuera del
+modelo) queda como mejora futura, no como parche de esta tarea.
 """
 
 from __future__ import annotations
 
+import hashlib
 import os
 import subprocess
 import sys
@@ -30,6 +42,11 @@ MAX_TEXTO_PDF = 20000  # caracteres; de más, se trunca
 CARPETAS_IGNORADAS = {"Library", "node_modules", ".Trash", "__pycache__", ".git", ".venv"}
 # Abrir estos archivos ejecutaría código, así que no se permite.
 EXTENSIONES_EJECUTABLES = {".command", ".sh", ".tool", ".terminal", ".scpt", ".workflow"}
+# escribir_archivo no puede tocar nada bajo estas carpetas, ni ningún
+# dotfile/dot-carpeta (.ssh, .zshrc, .bash_profile, .config...): escribir ahí
+# equivale a ejecutar código (un LaunchAgent, una rc de shell, una clave SSH),
+# el mismo nivel de riesgo que ejecutar_comando pero sin su confirmación.
+CARPETAS_PROHIBIDAS_ESCRITURA = {"Library"}
 
 CARPETAS_EN_ESPANOL = {
     "escritorio": "Desktop", "documentos": "Documents", "descargas": "Downloads",
@@ -55,6 +72,14 @@ def _ejecutar_shell(comando: str, carpeta: Path) -> subprocess.CompletedProcess:
 def registrar_sistema(h: "Herramientas", carpeta_personal: Path | None = None,
                       ejecutar: Ejecutor = _ejecutar, ejecutar_shell: EjecutorShell = _ejecutar_shell) -> None:
     raiz = (carpeta_personal or Path.home()).resolve()
+
+    def rechazar_ruta_sensible(destino: Path) -> None:
+        partes = destino.relative_to(raiz).parts
+        if any(p.startswith(".") for p in partes) or (partes and partes[0] in CARPETAS_PROHIBIDAS_ESCRITURA):
+            raise PermissionError(
+                "por seguridad no escribo ahí: ni dotfiles/dot-carpetas (.ssh, .zshrc, ...) "
+                "ni dentro de Library — equivale a ejecutar código sin tu confirmación real"
+            )
 
     def resolver(ruta: str) -> Path:
         """Convierte lo que diga el usuario en una ruta dentro de su carpeta personal."""
@@ -216,20 +241,39 @@ def registrar_sistema(h: "Herramientas", carpeta_personal: Path | None = None,
         "Crea un archivo nuevo (o reemplaza uno existente) dentro de la carpeta personal "
         "del usuario, con el contenido que le pases — por ejemplo, un archivo de código al "
         "armar un proyecto nuevo. La carpeta de destino tiene que existir: si no, creala "
-        "primero (p. ej. con ejecutar_comando: 'mkdir -p ...').",
+        "primero (p. ej. con ejecutar_comando: 'mkdir -p ...'). Llamala primero con "
+        "confirmado=false: eso deja la escritura pendiente. Mostrale al usuario la ruta "
+        "EXACTA y el contenido (o un resumen fiel si es muy largo) y esperá su respuesta. "
+        "Solo si en su siguiente mensaje confirma, volvé a llamarla con confirmado=true.",
         {
             "ruta": {
                 "type": "string",
                 "description": "Dónde crear el archivo, p. ej. 'Documents/mi-app/main.py'.",
             },
             "contenido": {"type": "string", "description": "Contenido completo del archivo."},
+            "confirmado": {
+                "type": "boolean",
+                "description": "true solo si el usuario ya vio la ruta y el contenido y confirmó.",
+            },
         },
         requiere_dueño=True,
     )
-    def escribir_archivo(ruta: str, contenido: str) -> str:
+    def escribir_archivo(ruta: str, contenido: str, confirmado: bool) -> str:
         destino = resolver_para_escribir(ruta)
+        rechazar_ruta_sensible(destino)
         if not destino.parent.is_dir():
             raise FileNotFoundError(f"la carpeta {_mostrar(destino.parent)} no existe todavía")
+        # La clave incluye la ruta Y un hash del contenido — igual que
+        # recordar ata hecho+valor, y ejecutar_comando el comando exacto:
+        # sin esto, se podía pedir confirmación mostrando un contenido y
+        # escribir otro distinto en la llamada confirmada (mismo hallazgo
+        # de seguridad ya corregido en crear_habilidad, PR #24).
+        resumen_contenido = hashlib.sha256(contenido.encode("utf-8")).hexdigest()
+        clave = ("escribir_archivo", str(destino), resumen_contenido)
+        if not h.autorizacion.pedir(clave, h.turno, confirmado, h.ultimo_mensaje_usuario):
+            return (f"Escritura de {_mostrar(destino)} pendiente de confirmar. Mostrale al "
+                    "usuario la ruta exacta y el contenido, y esperá su respuesta antes de "
+                    "llamar de nuevo con confirmado=true.")
         destino.write_text(contenido, encoding="utf-8")
         return f"Escrito {_mostrar(destino)} ({len(contenido)} caracteres)."
 

@@ -189,33 +189,89 @@ def test_no_hay_herramientas_de_borrar(tmp_path):
 
 # --- escribir_archivo ------------------------------------------------------
 
-def test_escribir_archivo_crea_el_archivo(sistema, casa):
+def _escribir_confirmado(sistema, ruta, contenido):
+    """escribir_archivo exige el mismo gate en dos pasos que recordar/
+    crear_habilidad/ejecutar_comando (ver hallazgo de seguridad real)."""
+    sistema.nuevo_turno("escribí ese archivo")
+    sistema.ejecutar("escribir_archivo", {"ruta": ruta, "contenido": contenido, "confirmado": False})
+    sistema.nuevo_turno("sí, dale")
+    return sistema.ejecutar("escribir_archivo", {"ruta": ruta, "contenido": contenido, "confirmado": True})
+
+
+def test_escribir_archivo_sin_confirmar_queda_pendiente_y_no_escribe(sistema, casa):
     salida, error = sistema.ejecutar("escribir_archivo", {
-        "ruta": "Documents/trabajo/main.py", "contenido": "print('hola')",
+        "ruta": "Documents/trabajo/main.py", "contenido": "print('hola')", "confirmado": False,
     })
+    assert not error
+    assert "pendiente" in salida.lower()
+    assert not (casa / "Documents" / "trabajo" / "main.py").is_file()
+
+
+def test_escribir_archivo_confirmar_no_permite_cambiar_el_contenido(sistema, casa):
+    """Mismo hallazgo de seguridad que crear_habilidad/ejecutar_comando: la
+    confirmación se ata a la ruta Y un hash del contenido — si cambia el
+    contenido entre el pedido y la confirmación, cuenta como un pedido
+    nuevo, no uno ya aprobado."""
+    sistema.ejecutar("escribir_archivo", {
+        "ruta": "Documents/trabajo/main.py", "contenido": "contenido inocente", "confirmado": False,
+    })
+    sistema.nuevo_turno("sí, dale")
+    salida, error = sistema.ejecutar("escribir_archivo", {
+        "ruta": "Documents/trabajo/main.py", "contenido": "contenido CAMBIADO", "confirmado": True,
+    })
+    assert not error
+    assert "pendiente" in salida.lower()
+    assert not (casa / "Documents" / "trabajo" / "main.py").is_file()
+
+
+def test_escribir_archivo_confirmado_crea_el_archivo(sistema, casa):
+    salida, error = _escribir_confirmado(sistema, "Documents/trabajo/main.py", "print('hola')")
     assert not error
     assert (casa / "Documents" / "trabajo" / "main.py").read_text() == "print('hola')"
     assert "main.py" in salida
 
 
 def test_escribir_archivo_sin_carpeta_destino_falla(sistema):
-    salida, error = sistema.ejecutar("escribir_archivo", {
-        "ruta": "Documents/no-existe/main.py", "contenido": "x",
-    })
+    salida, error = _escribir_confirmado(sistema, "Documents/no-existe/main.py", "x")
     assert error
 
 
 def test_escribir_archivo_no_escapa_la_carpeta_personal(sistema):
-    salida, error = sistema.ejecutar("escribir_archivo", {
-        "ruta": "../fuera.txt", "contenido": "malicioso",
-    })
+    salida, error = _escribir_confirmado(sistema, "../fuera.txt", "malicioso")
     assert error
 
 
 def test_escribir_archivo_reemplaza_uno_existente(sistema, casa):
-    sistema.ejecutar("escribir_archivo", {"ruta": "Documents/trabajo/x.txt", "contenido": "viejo"})
-    sistema.ejecutar("escribir_archivo", {"ruta": "Documents/trabajo/x.txt", "contenido": "nuevo"})
+    _escribir_confirmado(sistema, "Documents/trabajo/x.txt", "viejo")
+    _escribir_confirmado(sistema, "Documents/trabajo/x.txt", "nuevo")
     assert (casa / "Documents" / "trabajo" / "x.txt").read_text() == "nuevo"
+
+
+def test_escribir_archivo_requiere_dueño(sistema, casa):
+    sistema.nuevo_turno("escribí esto", es_dueño=False)
+    salida, error = sistema.ejecutar("escribir_archivo", {
+        "ruta": "Documents/trabajo/x.txt", "contenido": "x", "confirmado": False,
+    })
+    assert not error
+    assert "no puedo ejecutar" in salida.lower()
+
+
+def test_escribir_archivo_rechaza_dotfiles(sistema):
+    """Un dotfile (.ssh/authorized_keys, .zshrc, ...) equivale a ejecutar
+    código — hallazgo de seguridad real: antes no había ningún bloqueo."""
+    salida, error = _escribir_confirmado(sistema, ".zshrc", "echo hackeado")
+    assert error
+
+
+def test_escribir_archivo_rechaza_dot_carpetas(sistema):
+    salida, error = _escribir_confirmado(sistema, ".ssh/authorized_keys", "ssh-ed25519 AAAA...")
+    assert error
+
+
+def test_escribir_archivo_rechaza_library(sistema):
+    """Library/LaunchAgents/*.plist se ejecuta solo al iniciar sesión en macOS."""
+    salida, error = _escribir_confirmado(sistema, "Library/LaunchAgents/evil.plist", "<xml/>")
+    assert error
 
 
 # --- abrir_aplicacion con ruta ----------------------------------------------
