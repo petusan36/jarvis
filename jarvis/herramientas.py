@@ -15,6 +15,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable
 
+from .autorizacion import Autorizacion
+
 if TYPE_CHECKING:
     from .memoria.puerto import PuertoMemoria
 
@@ -39,30 +41,6 @@ class Herramienta:
             },
             "strict": True,
         }
-
-
-_PALABRAS_AFIRMATIVAS = {
-    "si", "sí", "dale", "ok", "okay", "listo", "correcto", "exacto",
-    "afirmativo", "confirmo", "claro", "obvio", "efectivamente", "simon",
-}
-
-
-def _suena_afirmativo(mensaje: str) -> bool:
-    """Heurística deliberadamente simple (lista fija de afirmaciones
-    frecuentes en español, no un modelo): alcanza para bloquear una
-    confirmación que el usuario nunca escribió, que es lo que importa acá
-    — no se busca distinguir matices, solo exigir ALGO que de verdad
-    parezca un sí antes de escribir en memoria permanente.
-
-    Mira SOLO la primera palabra, nunca "¿aparece en algún lugar del
-    mensaje?": un mensaje como "no, dale, mejor cancelá" contiene "dale"
-    (está en la lista) pero no es un sí — es justo lo contrario. Buscar la
-    palabra en cualquier posición abría ese bypass."""
-    palabras = mensaje.strip(".,!¿?¡ ").lower().split()
-    if not palabras:
-        return False
-    primera = palabras[0].strip(".,!¿?¡")
-    return primera in _PALABRAS_AFIRMATIVAS
 
 
 class Herramientas:
@@ -93,6 +71,10 @@ class Herramientas:
         # contexto de memoria en el prompt: Jarvis sigue funcionando igual
         # que antes de esta tarea.
         self.memoria = memoria
+        # Compartida por cualquier herramienta que necesite confirmación en dos
+        # pasos (ver jarvis.autorizacion): "recordar" acá, "cerrar_aplicacion" en
+        # sistema.py, y cualquier herramienta futura que la necesite.
+        self.autorizacion = Autorizacion()
         self._registrar_basicas()
         if sistema:
             from .sistema import registrar_sistema
@@ -189,14 +171,6 @@ class Herramientas:
             return "Cerrando Jarvis."
 
     def _registrar_memoria(self, memoria: "PuertoMemoria") -> None:
-        # Escrituras pendientes de confirmar: (hecho, valor) → turno en que se pidieron.
-        # Mismo patrón que cerrar_aplicacion (ver sistema.py): sin esto, cualquier
-        # instrucción inyectada (p. ej. desde una página web o un PDF que Jarvis lea)
-        # podía hacer que el modelo grabara algo en memoria permanente sin que el
-        # usuario lo viera ni lo aprobara — y esa memoria se re-inyecta en el
-        # system prompt de TODAS las conversaciones futuras (ver _contexto_memoria).
-        pendientes: dict[tuple[str, str], int] = {}
-
         @self.registrar(
             "recordar",
             "Guarda en la memoria permanente de Jarvis un hecho sobre el usuario "
@@ -224,32 +198,11 @@ class Herramientas:
             },
         )
         def recordar(hecho: str, valor: str, confirmado: bool) -> str:
-            clave = (hecho.strip().lower(), valor.strip().lower())
-            pedido_en = pendientes.get(clave)
-            # Tres condiciones, no una: que el pedido sea justo del turno
-            # ANTERIOR (no "en algún momento antes" — un pendiente viejo
-            # colgado ahí podía quedar satisfecho por un "sí" de otro tema,
-            # en otro turno, meses después: la confirmación no estaba atada
-            # al pedido concreto); que lo que el usuario escribió en ese
-            # turno exacto suene a un sí; y que "confirmado=true" lo diga el
-            # modelo (no prueba nada por sí solo, es la entrada que controla
-            # el modelo, no el usuario — por eso las otras dos condiciones).
-            confirmacion_real = confirmado and pedido_en is not None \
-                and pedido_en == self.turno - 1 \
-                and _suena_afirmativo(self.ultimo_mensaje_usuario)
-            if not confirmacion_real:
-                # setdefault, NO reemplazo incondicional: si ya hay un pedido
-                # pendiente para esta clave, su turno original NO se renueva.
-                # Sin esto, el modelo podía reintentar confirmado=true en
-                # cada turno sucesivo hasta que el usuario dijera "sí" por
-                # cualquier motivo no relacionado — cada intento fallido
-                # corría la ventana "turno siguiente" hacia adelante, así
-                # que la ataba al pedido original dejaba de servir de nada.
-                pendientes.setdefault(clave, self.turno)
+            clave = ("recordar", hecho.strip().lower(), valor.strip().lower())
+            if not self.autorizacion.pedir(clave, self.turno, confirmado, self.ultimo_mensaje_usuario):
                 return (f"Guardar «{hecho}: {valor}» en memoria, pendiente de confirmar. "
                         "Pregúntale al usuario si quiere que lo recuerdes y esperá su "
                         "respuesta antes de llamar de nuevo con confirmado=true.")
-            del pendientes[clave]
             return memoria.recordar(hecho, valor)
 
     def _ruta_notas(self) -> Path:
