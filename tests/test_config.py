@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from jarvis.config import Config, guardar_en_env
 
 
@@ -32,6 +34,24 @@ def test_guardar_en_env_agrega_clave_nueva_al_final(tmp_path):
     guardar_en_env("JARVIS_MODELO", "qwen3:8b", ruta)
 
     assert ruta.read_text() == "OTRA_CLAVE=valor\nJARVIS_MODELO=qwen3:8b\n"
+
+
+def test_guardar_en_env_rechaza_salto_de_linea_en_el_valor(tmp_path):
+    """Defensa en profundidad: no confía en que quien llama (p. ej. la
+    herramienta "guardar_nombre", con un valor que decide el modelo) ya
+    validó esto — un salto de línea en el valor inyectaría una línea nueva
+    en .env, pisando cualquier otra variable."""
+    ruta = tmp_path / ".env"
+    with pytest.raises(ValueError):
+        guardar_en_env("JARVIS_NOMBRE_USUARIO", "Pedro\nANTHROPIC_API_KEY=robada", ruta)
+    assert not ruta.is_file()
+
+
+def test_guardar_en_env_rechaza_salto_de_linea_en_la_clave(tmp_path):
+    ruta = tmp_path / ".env"
+    with pytest.raises(ValueError):
+        guardar_en_env("CLAVE\nOTRA=x", "valor", ruta)
+    assert not ruta.is_file()
 
 
 def test_config_desde_entorno_lee_proveedor_y_url_de_ollama(monkeypatch, tmp_path):

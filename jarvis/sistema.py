@@ -44,8 +44,6 @@ def _ejecutar(comando: list[str]) -> subprocess.CompletedProcess:
 def registrar_sistema(h: "Herramientas", carpeta_personal: Path | None = None,
                       ejecutar: Ejecutor = _ejecutar) -> None:
     raiz = (carpeta_personal or Path.home()).resolve()
-    # Cierres pendientes de confirmar: nombre de la app → turno en que se pidió.
-    pendientes: dict[str, int] = {}
 
     def resolver(ruta: str) -> Path:
         """Convierte lo que diga el usuario en una ruta dentro de su carpeta personal."""
@@ -130,6 +128,7 @@ def registrar_sistema(h: "Herramientas", carpeta_personal: Path | None = None,
         "Abre un archivo con su aplicación habitual, o una carpeta en el Finder. "
         "La ruta es relativa a la carpeta personal del usuario.",
         {"ruta": {"type": "string", "description": "Por ejemplo 'Documents/informe.pdf' o 'Downloads'."}},
+        requiere_dueño=True,
     )
     def abrir_archivo_o_carpeta(ruta: str) -> str:
         destino = resolver(ruta)
@@ -164,6 +163,7 @@ def registrar_sistema(h: "Herramientas", carpeta_personal: Path | None = None,
         "'Safari', 'Spotify' o 'Visual Studio Code'. Si no la encuentra, prueba con su "
         "nombre en inglés (por ejemplo 'Notes' en lugar de 'Notas').",
         {"nombre": {"type": "string", "description": "Nombre de la aplicación."}},
+        requiere_dueño=True,
     )
     def abrir_aplicacion(nombre: str) -> str:
         comprobar(ejecutar(["open", "-a", nombre.strip()]), f"abrir {nombre}")
@@ -192,16 +192,13 @@ def registrar_sistema(h: "Herramientas", carpeta_personal: Path | None = None,
             "confirmado": {"type": "boolean",
                            "description": "true solo si el usuario ya ha confirmado el cierre."},
         },
+        requiere_dueño=True,
     )
     def cerrar_aplicacion(nombre: str, confirmado: bool) -> str:
-        clave = nombre.strip().lower()
-        pedido_en = pendientes.get(clave)
-        # Solo vale una confirmación dada en un mensaje posterior a la petición.
-        if not confirmado or pedido_en is None or pedido_en >= h.turno:
-            pendientes.setdefault(clave, h.turno)
+        clave = ("cerrar_aplicacion", nombre.strip().lower())
+        if not h.autorizacion.pedir(clave, h.turno, confirmado, h.ultimo_mensaje_usuario):
             return (f"Cierre de {nombre} pendiente. Pregunta al usuario si quiere cerrarla y "
                     "espera a que responda antes de llamar con confirmado=true.")
-        del pendientes[clave]
         comprobar(ejecutar(["osascript", "-e", f'tell application "{_applescript(nombre)}" to quit']),
                   f"cerrar {nombre}")
         return f"{nombre} cerrada."

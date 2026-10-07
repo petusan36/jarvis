@@ -245,6 +245,84 @@ voz del actor ni la imita). Habla en español con el modelo multilingüe.
 Puedes elegir otra en <https://elevenlabs.io/app/voice-library> y poner su id
 en `JARVIS_ELEVENLABS_VOZ`.
 
+## Reconocimiento de voz del usuario
+
+Jarvis puede reconocer la voz de su dueño y negarse a ejecutar acciones (abrir
+o cerrar aplicaciones, abrir archivos o páginas web, reproducir música,
+guardar notas o recuerdos, cerrarse a sí mismo) si quien habla no es él —
+responder preguntas o charlar sigue funcionando para cualquiera. Mientras no
+enroles tu voz, Jarvis no exige nada (comportamiento de siempre).
+
+Para activarlo:
+
+```bash
+python -m jarvis --enrolar-voz
+```
+
+Pulsa Enter y hablá sin parar unos 6 segundos (cualquier frase sirve). Jarvis
+guarda tu huella de voz en `~/.jarvis/voz_dueño.npy`. Repetí el comando para
+reemplazarla.
+
+Usa un modelo neuronal local (SpeechBrain ECAPA-TDNN,
+`speechbrain/spkrec-ecapa-voxceleb`), que descarga la primera vez
+(unos 80 MB), igual que Whisper o Kokoro. El umbral de similitud es
+provisional — no se pudo calibrar con voces humanas reales distintas en el
+entorno donde se desarrolló esta función, solo verificar que el modelo carga
+y produce resultados comparables. Si Jarvis rechaza tu propia voz o acepta
+la de otra persona, ajustá `JARVIS_VOZ_UMBRAL` (por defecto `0.75`; más alto
+exige más parecido). Para desactivarlo del todo: `JARVIS_VOZ_RECONOCIMIENTO=0`.
+
+## Cómo te llama Jarvis
+
+Por defecto te dice "señor". Mientras no le hayas dicho tu nombre, lo va a
+preguntar en algún momento natural de la conversación (no en el primer
+mensaje) y, en cuanto lo digas, lo recuerda para siempre — queda guardado en
+`~/.jarvis/.env` (`JARVIS_NOMBRE_USUARIO`), así que sobrevive a que cierres y
+vuelvas a abrir Jarvis, sin necesidad de tener la memoria permanente
+activada. Podés cambiarlo en cualquier momento volviendo a decírselo.
+
+## Modo de escucha pasiva
+
+Decile "duerme" o "descansá por ahora" y Jarvis deja de responder a lo que
+se diga cerca del micrófono hasta que lo nombres de nuevo ("Jarvis, ...") —
+a diferencia de cerrarlo del todo, la app sigue corriendo. En la ventana
+nativa del HUD (macOS), además se oculta mientras duerme y vuelve a
+aparecer al despertarlo.
+
+También entra solo en este modo tras un rato sin que le pidas nada
+(`JARVIS_REPOSO_INACTIVIDAD_SEGUNDOS`, 300 por defecto = 5 minutos; `0`
+desactiva el reposo automático, aunque el pedido explícito con la voz sigue
+funcionando).
+
+## Cómo mejora Jarvis con el tiempo
+
+Dos capas distintas, que no se mezclan:
+
+- **Memoria** (`jarvis/memoria/`, activada por defecto desde esta versión):
+  hechos y preferencias sobre vos — "le gusta el rock", "vive en Córdoba" —
+  guardados con la herramienta "recordar" (pide confirmación antes de
+  guardar nada). Es un grafo temporal (Graphiti + LadybugDB): un hecho que
+  actualiza a otro más viejo lo invalida en vez de dejarlos contradictorios,
+  y lo invalidado se archiva en frío tras un tiempo (`JARVIS_MEMORIA_VENTANA_GRACIA_DIAS`)
+  en vez de crecer sin límite. Se inyecta en cada conversación como DATO,
+  nunca como instrucción — necesita Ollama + `nomic-embed-text`, que ya
+  quedan instalados con el comando único de instalación. Para apagarla:
+  `JARVIS_MEMORIA=0`.
+- **Habilidades** (`jarvis/habilidades.py`): procedimientos que Jarvis
+  descubre y se escribe a sí mismo — "cómo resumir un PDF largo en partes",
+  por ejemplo — con la herramienta "crear_habilidad". Es texto plano, al
+  estilo de un archivo de skill, **nunca código que se ejecute**: Jarvis no
+  genera ni corre programas por su cuenta, y no instala nada por sí mismo.
+  Llamar a "crear_habilidad" de nuevo con el mismo nombre mejora esa
+  habilidad (la reemplaza entera, no la combina). Se cargan en dos niveles:
+  el nombre y para qué sirve cada una están siempre visibles; el
+  procedimiento completo se lee bajo demanda con "leer_habilidad", para no
+  inflar cada conversación con contenido que tal vez no haga falta.
+
+Ambas exigen que sea tu voz la que lo pida (reconocimiento de voz del
+usuario, si lo enrolaste) — nadie más puede hacer que Jarvis aprenda algo
+sobre vos o cambie cómo hace las cosas.
+
 ## Animación (HUD)
 
 En el modo completo (por defecto) ya se abre sola: un arco reactor en el
@@ -423,17 +501,24 @@ Todo se ajusta en el archivo `.env` (mira `.env.example`):
 | `JARVIS_ELEVENLABS_VOZ` | `JBFqnCBsd6RMkjVDRZzb` (George) | Id de voz de <https://elevenlabs.io/app/voice-library> |
 | `JARVIS_ELEVENLABS_MODELO` | `eleven_multilingual_v2` | Modelo de ElevenLabs |
 | `YOUTUBE_API_KEY` | — | Reproduce directo el primer resultado al pedir música; sin ella, abre los resultados |
+| `JARVIS_VOZ_RECONOCIMIENTO` | `1` | `0` desactiva el reconocimiento de voz del usuario del todo |
+| `JARVIS_VOZ_UMBRAL` | `0.75` | Similitud mínima para considerar que es la voz del dueño (ver "Reconocimiento de voz del usuario") |
+| `JARVIS_REPOSO_INACTIVIDAD_SEGUNDOS` | `300` | Tras cuánto tiempo sin pedirle nada entra solo en modo de escucha pasiva; `0` lo desactiva |
 
 ## Estructura
 
 ```
 jarvis/
-├── __main__.py      punto de entrada: menú de conexión + bucle principal
+├── __main__.py      punto de entrada: CLI, instancia única y bucle principal
+├── conexion_ia.py   menú de conexión con un modelo de IA + login de proveedores en la nube
+├── instancia.py     instancia única (.pid) + redirección de log del bundle standalone
 ├── cerebro.py       conversación vía el puerto ProveedorIA + ejecución de herramientas
 ├── cerebro_suscripcion.py  lo mismo usando tu suscripción de Claude (Agent SDK)
 ├── proveedores/     puerto ProveedorIA y adaptadores (Anthropic, Ollama, Codex)
 ├── memoria/         puerto PuertoMemoria + adaptador Graphiti/LadybugDB/Ollama + archivo frío
 ├── herramientas.py  herramientas que el modelo puede usar
+├── habilidades.py   habilidades propias que Jarvis se escribe a sí mismo (texto, no código)
+├── autorizacion.py  confirmación en dos pasos para herramientas sensibles (ver roadmap punto 3)
 ├── sistema.py       herramientas de carpetas, aplicaciones y PDFs (macOS)
 ├── musica.py        buscar y reproducir música en YouTube
 ├── web.py           abrir páginas web / buscar en Google
@@ -445,6 +530,7 @@ jarvis/
 │   └── menu.html          página del menú de conexión con IA
 └── voz/
     ├── oido.py      micrófono + Whisper (faster-whisper)
+    ├── hablante.py  reconocimiento de voz del usuario (SpeechBrain ECAPA-TDNN)
     └── habla.py     síntesis de voz (elevenlabs, kokoro, piper, macos, pyttsx3)
 scripts/             build_app.sh + spec de PyInstaller para el bundle standalone
 tests/               pruebas sin red (proveedores/memoria simulados)

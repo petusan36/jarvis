@@ -10,7 +10,7 @@ una cola de acciones que el hilo de trabajo de Python puede esperar con
 ``esperar_accion``.
 
 El estado es intencionalmente un diccionario libre (no un enum cerrado):
-quien orquesta el flujo (ver ``jarvis.__main__._atender_menu_ventana`` y
+quien orquesta el flujo (ver ``jarvis.conexion_ia._atender_menu_ventana`` y
 funciones relacionadas) decide qué claves manda en cada paso; esta clase
 solo lo guarda y lo sirve.
 """

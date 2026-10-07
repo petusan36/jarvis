@@ -14,9 +14,9 @@ def musica(tmp_path):
     return Herramientas(tmp_path, sistema=False, youtube_api_key="")
 
 
-def test_sin_clave_abre_resultados_de_busqueda(monkeypatch, musica):
+def test_sin_clave_abre_resultados_de_busqueda(musica):
     abiertas = []
-    monkeypatch.setattr("jarvis.musica.webbrowser.open", lambda url: abiertas.append(url))
+    registrar_musica(musica, "", abrir_navegador=abiertas.append)
 
     salida, error = musica.ejecutar("reproducir_musica", {"busqueda": "Bohemian Rhapsody"})
 
@@ -27,11 +27,11 @@ def test_sin_clave_abre_resultados_de_busqueda(monkeypatch, musica):
     assert "YOUTUBE_API_KEY" in salida
 
 
-def test_con_clave_y_resultado_reproduce_directo(monkeypatch, tmp_path):
+def test_con_clave_y_resultado_reproduce_directo(tmp_path):
     h = Herramientas(tmp_path, sistema=False, youtube_api_key="clave-de-prueba")
     abiertas = []
-    monkeypatch.setattr("jarvis.musica.webbrowser.open", lambda url: abiertas.append(url))
-    monkeypatch.setattr("jarvis.musica._buscar_primer_video", lambda busqueda, clave: "abc123")
+    registrar_musica(h, "clave-de-prueba", abrir_navegador=abiertas.append,
+                     buscar_video=lambda busqueda, clave: "abc123")
 
     salida, error = h.ejecutar("reproducir_musica", {"busqueda": "Bohemian Rhapsody"})
 
@@ -41,11 +41,11 @@ def test_con_clave_y_resultado_reproduce_directo(monkeypatch, tmp_path):
     assert "YOUTUBE_API_KEY" not in salida
 
 
-def test_con_clave_pero_api_falla_cae_a_resultados(monkeypatch, tmp_path):
+def test_con_clave_pero_api_falla_cae_a_resultados(tmp_path):
     h = Herramientas(tmp_path, sistema=False, youtube_api_key="clave-de-prueba")
     abiertas = []
-    monkeypatch.setattr("jarvis.musica.webbrowser.open", lambda url: abiertas.append(url))
-    monkeypatch.setattr("jarvis.musica._buscar_primer_video", lambda busqueda, clave: None)
+    registrar_musica(h, "clave-de-prueba", abrir_navegador=abiertas.append,
+                     buscar_video=lambda busqueda, clave: None)
 
     salida, error = h.ejecutar("reproducir_musica", {"busqueda": "algo raro"})
 

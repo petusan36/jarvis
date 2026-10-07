@@ -16,7 +16,14 @@ import os
 from contextlib import aclosing
 from typing import Any
 
-from .cerebro import INSTRUCCIONES, MAX_VUELTAS
+from .cerebro import (
+    INSTRUCCIONES,
+    MAX_VUELTAS,
+    _NOMBRE_POR_DEFECTO,
+    _PEDIR_NOMBRE,
+    _contexto_habilidades,
+    _contexto_memoria,
+)
 from .config import Config
 from .herramientas import Herramientas
 
@@ -36,8 +43,8 @@ class CerebroSuscripcion:
         self._bucle = asyncio.new_event_loop()
         self._cliente = cliente
 
-    def responder(self, texto_usuario: str) -> str:
-        self.herramientas.nuevo_turno(texto_usuario)
+    def responder(self, texto_usuario: str, es_dueño: bool = True) -> str:
+        self.herramientas.nuevo_turno(texto_usuario, es_dueño)
         return self._bucle.run_until_complete(self._responder(texto_usuario))
 
     def olvidar(self) -> None:
@@ -53,7 +60,7 @@ class CerebroSuscripcion:
         from claude_agent_sdk import AssistantMessage, ResultMessage, TextBlock
 
         if self._cliente is None:
-            self._cliente = await self._conectar()
+            self._cliente = await self._conectar(texto_usuario)
 
         await self._cliente.query(texto_usuario)
         partes: list[str] = []
@@ -68,15 +75,27 @@ class CerebroSuscripcion:
                         return mensaje.result.strip()
         return " ".join(p.strip() for p in partes if p.strip()) or "..."
 
-    async def _conectar(self):
+    async def _conectar(self, texto_usuario: str):
+        """``texto_usuario``: el Claude Agent SDK fija el system_prompt una
+        sola vez, al conectar — a diferencia de Cerebro.responder (que lo
+        reconstruye cada turno), así que el contexto de memoria/habilidades
+        queda fijo con lo relevante al primer mensaje de la sesión, no se
+        actualiza turno a turno. Limitación real del SDK, no un descuido."""
         from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKClient
 
         servidor = _servidor_mcp(self.herramientas)
         nombres = [f"mcp__{SERVIDOR}__{d['name']}" for d in self.herramientas.definiciones()]
         # Sin clave en el entorno, Claude Code usa la sesión de tu suscripción.
         os.environ.pop("ANTHROPIC_API_KEY", None)
+        sistema = (
+            INSTRUCCIONES.format(nombre=self.config.nombre_usuario)
+            + _contexto_memoria(self.herramientas.memoria, texto_usuario)
+            + _contexto_habilidades(self.config.carpeta_datos)
+        )
+        if self.config.nombre_usuario == _NOMBRE_POR_DEFECTO:
+            sistema += _PEDIR_NOMBRE
         opciones = ClaudeAgentOptions(
-            system_prompt=INSTRUCCIONES.format(nombre=self.config.nombre_usuario),
+            system_prompt=sistema,
             model=self.config.modelo,
             effort=self.config.esfuerzo,
             tools=[],  # sin terminal ni edición de archivos: solo las herramientas de Jarvis
