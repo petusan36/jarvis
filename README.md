@@ -457,7 +457,9 @@ Todo se ajusta en el archivo `.env` (mira `.env.example`):
 
 ```
 jarvis/
-├── __main__.py      punto de entrada: menú de conexión + bucle principal
+├── __main__.py      punto de entrada: CLI, instancia única y bucle principal
+├── conexion_ia.py   menú de conexión con un modelo de IA + login de proveedores en la nube
+├── instancia.py     instancia única (.pid) + redirección de log del bundle standalone
 ├── cerebro.py       conversación vía el puerto ProveedorIA + ejecución de herramientas
 ├── cerebro_suscripcion.py  lo mismo usando tu suscripción de Claude (Agent SDK)
 ├── proveedores/     puerto ProveedorIA y adaptadores (Anthropic, Ollama, Codex)

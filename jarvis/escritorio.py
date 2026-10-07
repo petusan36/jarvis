@@ -19,7 +19,7 @@ Si el bundle todavía no se construyó (no existe ``dist/Jarvis.app`` ni
 claras para correr primero ``scripts/build_app.sh``.
 
 El doble clic arranca sin terminal, así que el menú de conexión con IA cae
-a la ventana nativa (ver ``jarvis.__main__._menu_conexion_ia_ventana``) en
+a la ventana nativa (ver ``jarvis.conexion_ia._menu_conexion_ia_ventana``) en
 vez de a ``input()``/``print()`` — eso no depende de cómo se instaló, solo
 de si hay una tty real o no.
 
