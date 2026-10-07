@@ -71,12 +71,6 @@ def _crear_cerebro(config: Config, forzar_menu: bool = False):
     La única clave que Jarvis todavía puede usar es ANTHROPIC_API_KEY si
     ya está en el entorno (uso directo de la API, sin pasar por ningún
     menú — comportamiento previo a todo esto, sin cambios)."""
-    herramientas = Herramientas(
-        config.carpeta_datos,
-        youtube_api_key=config.youtube_api_key,
-        memoria=_crear_memoria(config) if config.memoria_habilitada else None,
-        config=config,
-    )
     if sys.stdin.isatty():
         # Hay una terminal real (ej. corriste `python -m jarvis` a mano): el
         # menú de siempre, por input()/print(). Esto no cambia aunque haya
@@ -96,6 +90,18 @@ def _crear_cerebro(config: Config, forzar_menu: bool = False):
             "con un modelo de IA. Abrí una terminal y ejecutá python -m jarvis."
         )
     config = Config.desde_entorno()
+    # Construida DESPUÉS del menú, con el config final: si Herramientas se
+    # construyera antes (con el config de antes del menú), guardar_nombre
+    # mutaría un objeto Config que Cerebro ya no usa — el nombre quedaría
+    # bien guardado en .env, pero nunca se vería en lo que queda de esta
+    # sesión (confirmado en vivo: Jarvis seguía despidiéndose con el
+    # nombre viejo después de confirmar uno nuevo).
+    herramientas = Herramientas(
+        config.carpeta_datos,
+        youtube_api_key=config.youtube_api_key,
+        memoria=_crear_memoria(config) if config.memoria_habilitada else None,
+        config=config,
+    )
     if motor in ("suscripcion", "suscripción"):
         from .cerebro_suscripcion import CerebroSuscripcion
         print("(usando tu suscripción de Claude a través de Claude Code)")
