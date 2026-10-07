@@ -333,7 +333,13 @@ class Herramientas:
             requiere_dueño=True,
         )
         def crear_habilidad(nombre: str, descripcion: str, contenido: str, confirmado: bool) -> str:
-            clave = ("crear_habilidad", nombre.strip().lower())
+            # La clave incluye descripcion y contenido, no solo nombre —
+            # igual que recordar incluye valor, no solo hecho. Sin esto, se
+            # podía pedir confirmación mostrando un contenido inocente y
+            # guardar otro distinto en la llamada confirmada, con tal de
+            # que el nombre coincidiera: la confirmación quedaba atada al
+            # nombre, no a lo que el usuario de verdad vio y aprobó.
+            clave = ("crear_habilidad", nombre.strip().lower(), descripcion.strip(), contenido.strip())
             if not self.autorizacion.pedir(clave, self.turno, confirmado, self.ultimo_mensaje_usuario):
                 return (
                     f"Guardar la habilidad «{nombre}» pendiente de confirmar. Mostrale al "

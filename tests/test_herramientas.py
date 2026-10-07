@@ -208,6 +208,27 @@ def test_crear_habilidad_confirmada_en_el_mismo_turno_no_escribe(h):
     assert "pendiente" in salida.lower()
 
 
+def test_crear_habilidad_confirmar_no_permite_cambiar_el_contenido(h):
+    """Hallazgo de seguridad real: la confirmación tiene que atarse a lo
+    que el usuario de verdad vio y aprobó, no solo al nombre. Pedir con un
+    contenido y confirmar con otro distinto no debería guardar el
+    contenido cambiado — fuerza a empezar el pedido de nuevo."""
+    h.nuevo_turno("guardá esto como habilidad")
+    h.ejecutar("crear_habilidad", {
+        "nombre": "x", "descripcion": "contenido inocente", "contenido": "contenido inocente",
+        "confirmado": False,
+    })
+    h.nuevo_turno("sí, guardalo")
+    salida, error = h.ejecutar("crear_habilidad", {
+        "nombre": "x", "descripcion": "contenido CAMBIADO", "contenido": "contenido CAMBIADO",
+        "confirmado": True,
+    })
+    assert not error
+    assert "pendiente" in salida.lower()  # no se guardó: es un pedido nuevo, no confirmado todavía
+    salida_listado, _ = h.ejecutar("listar_habilidades", {})
+    assert "No tengo ninguna habilidad" in salida_listado
+
+
 def test_crear_habilidad_confirmada_la_guarda_y_queda_listable(h):
     salida, error = _crear_habilidad_confirmada(
         h, "resumen-pdf-largo", "Cómo resumir un PDF largo en partes",
