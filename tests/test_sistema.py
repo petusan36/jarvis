@@ -93,10 +93,22 @@ def test_cerrar_aplicacion_exige_confirmacion_en_otro_mensaje(sistema):
     assert sistema.ejecutor.comandos == []
 
 
-    sistema.nuevo_turno()  # el usuario responde "sí"
+    sistema.nuevo_turno("sí")  # el usuario responde "sí"
     salida, error = sistema.ejecutar("cerrar_aplicacion", {"nombre": "safari", "confirmado": True})
     assert not error and "cerrada" in salida
     assert sistema.ejecutor.comandos == [["osascript", "-e", 'tell application "safari" to quit']]
+
+
+def test_cerrar_aplicacion_no_confirma_sin_un_si_real(sistema):
+    """Antes de generalizar la autorización (ver jarvis.autorizacion), esta
+    herramienta no exigía que el mensaje del usuario sonara afirmativo: un
+    confirmado=true alcanzaba, viniera de donde viniera. Mismo caso que
+    protege "recordar" contra una instrucción inyectada."""
+    sistema.ejecutar("cerrar_aplicacion", {"nombre": "Safari", "confirmado": False})
+    sistema.nuevo_turno("¿y qué hora es?")  # turno siguiente, pero no es un sí
+    salida, _ = sistema.ejecutar("cerrar_aplicacion", {"nombre": "Safari", "confirmado": True})
+    assert "pendiente" in salida
+    assert sistema.ejecutor.comandos == []
 
 
 def _pdf_minimo(texto: str) -> bytes:
@@ -147,7 +159,7 @@ def test_leer_pdf_trunca_texto_largo(sistema, casa, monkeypatch):
 
 def test_cerrar_aplicacion_escapa_comillas(sistema):
     sistema.ejecutar("cerrar_aplicacion", {"nombre": 'X" to quit\ndo shell script "ls', "confirmado": False})
-    sistema.nuevo_turno()
+    sistema.nuevo_turno("sí")
     sistema.ejecutar("cerrar_aplicacion", {"nombre": 'X" to quit\ndo shell script "ls', "confirmado": True})
     script = sistema.ejecutor.comandos[-1][-1]
     assert script.startswith('tell application "X\\" to quit')

@@ -44,8 +44,6 @@ def _ejecutar(comando: list[str]) -> subprocess.CompletedProcess:
 def registrar_sistema(h: "Herramientas", carpeta_personal: Path | None = None,
                       ejecutar: Ejecutor = _ejecutar) -> None:
     raiz = (carpeta_personal or Path.home()).resolve()
-    # Cierres pendientes de confirmar: nombre de la app → turno en que se pidió.
-    pendientes: dict[str, int] = {}
 
     def resolver(ruta: str) -> Path:
         """Convierte lo que diga el usuario en una ruta dentro de su carpeta personal."""
@@ -194,14 +192,10 @@ def registrar_sistema(h: "Herramientas", carpeta_personal: Path | None = None,
         },
     )
     def cerrar_aplicacion(nombre: str, confirmado: bool) -> str:
-        clave = nombre.strip().lower()
-        pedido_en = pendientes.get(clave)
-        # Solo vale una confirmación dada en un mensaje posterior a la petición.
-        if not confirmado or pedido_en is None or pedido_en >= h.turno:
-            pendientes.setdefault(clave, h.turno)
+        clave = ("cerrar_aplicacion", nombre.strip().lower())
+        if not h.autorizacion.pedir(clave, h.turno, confirmado, h.ultimo_mensaje_usuario):
             return (f"Cierre de {nombre} pendiente. Pregunta al usuario si quiere cerrarla y "
                     "espera a que responda antes de llamar con confirmado=true.")
-        del pendientes[clave]
         comprobar(ejecutar(["osascript", "-e", f'tell application "{_applescript(nombre)}" to quit']),
                   f"cerrar {nombre}")
         return f"{nombre} cerrada."
