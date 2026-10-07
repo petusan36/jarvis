@@ -82,7 +82,8 @@ class DetectorVoz:
 
 class Oido:
     def __init__(self, modelo: str = "small", idioma: str = "es", hud: HudNulo | None = None,
-                 pulsar: bool = False, palabra_activacion: str = "", sensibilidad: float = 3.0):
+                 pulsar: bool = False, palabra_activacion: str = "", sensibilidad: float = 3.0,
+                 verificador=None, referencia_voz=None):
         try:
             from faster_whisper import WhisperModel
         except ImportError as error:
@@ -98,6 +99,15 @@ class Oido:
         self._avisado = False
         # La primera vez descarga el modelo (small ≈ 500 MB).
         self.modelo = WhisperModel(modelo, device="auto", compute_type="int8")
+        # Reconocimiento de hablante (ver jarvis.voz.hablante). Si no hay
+        # verificador configurado o todavía no hay voz de referencia
+        # enrolada, es_dueño queda siempre en True: Jarvis no exige nada
+        # hasta que el usuario enrola su voz.
+        self.verificador = verificador
+        self.referencia_voz = referencia_voz
+        # Lo deja escrito escuchar() después de cada frase, para que quien
+        # llame (ver jarvis.__main__) sepa si la voz coincidió con la dueña.
+        self.es_dueño = True
 
     def escuchar(self) -> str:
         """Espera a que el usuario diga algo y devuelve el texto transcrito."""
@@ -105,12 +115,21 @@ class Oido:
             audio = self._grabar_pulsando() if self.pulsar else self._grabar_continuo()
             self.hud.estado("pensando")
             texto = self._transcribir(audio) if audio is not None else ""
+            self.es_dueño = self._coincide_con_dueño(audio) if audio is not None else True
             if self.pulsar:
                 return texto
             texto = filtrar_palabra_activacion(texto, self.palabra_activacion)
             if texto:
                 return texto
             # Ruido, una alucinación de Whisper o no iba dirigido a Jarvis: seguir escuchando.
+
+    def _coincide_con_dueño(self, audio) -> bool:
+        if self.verificador is None or self.referencia_voz is None:
+            return True
+        try:
+            return self.verificador.coincide(audio, self.referencia_voz)
+        except Exception:
+            return True  # el reconocimiento de hablante es un extra: si falla, no bloquea a Jarvis
 
     def vigilar_interrupcion(self, palabra: str, detener_vigia: threading.Event,
                              al_detectar) -> threading.Event:

@@ -21,6 +21,7 @@ def registrar_web(h: "Herramientas") -> None:
         "música en YouTube con reproducción automática, usa mejor "
         "reproducir_musica.",
         {"url_o_busqueda": {"type": "string", "description": "URL completa o términos a buscar."}},
+        requiere_dueño=True,
     )
     def abrir_pagina_web(url_o_busqueda: str) -> str:
         texto = url_o_busqueda.strip()

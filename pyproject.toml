@@ -24,6 +24,8 @@ dependencies = [
     "pyobjc-framework-WebKit>=10.0; sys_platform == 'darwin'",
     "graphiti-core>=0.30.2",
     "ladybug>=0.21.2",  # ex-Kuzu (LadybugDB): grafo+vectores embebido, sin servidor
+    "speechbrain>=1.0",  # reconocimiento de hablante (ver jarvis.voz.hablante)
+    "torchaudio>=2.0",
 ]
 
 [project.optional-dependencies]

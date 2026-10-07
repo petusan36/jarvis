@@ -27,6 +27,13 @@ class Herramienta:
     descripcion: str
     parametros: dict[str, Any]
     funcion: Callable[..., str]
+    # True para herramientas que ejecutan una acción real (abrir algo, cerrar
+    # algo, escribir algo), no solo informar. Ver reconocimiento de voz del
+    # usuario (jarvis.voz.hablante) y Herramientas.ejecutar: si la voz de
+    # quien habla no es la del dueño de Jarvis, estas herramientas se niegan
+    # a ejecutarse en lugar de hacerlo para cualquiera que hable cerca del
+    # micrófono.
+    requiere_dueño: bool = False
 
     def definicion(self) -> dict[str, Any]:
         """Definición en el formato que espera la API de Claude."""
@@ -75,6 +82,13 @@ class Herramientas:
         # pasos (ver jarvis.autorizacion): "recordar" acá, "cerrar_aplicacion" en
         # sistema.py, y cualquier herramienta futura que la necesite.
         self.autorizacion = Autorizacion()
+        # Si quien habla en este turno es (o se asume que es, cuando no hay
+        # reconocimiento de voz activo) el dueño de Jarvis. Lo fija
+        # nuevo_turno; ejecutar() lo revisa antes de correr una herramienta
+        # marcada con requiere_dueño=True. Por defecto True: sin verificador
+        # de hablante configurado (ver jarvis.voz.hablante), Jarvis se
+        # comporta como siempre, sin exigir nada.
+        self.es_dueño_quien_habla = True
         self._registrar_basicas()
         if sistema:
             from .sistema import registrar_sistema
@@ -86,14 +100,20 @@ class Herramientas:
         if memoria is not None:
             self._registrar_memoria(memoria)
 
-    def nuevo_turno(self, texto_usuario: str = "") -> None:
-        """Avisa de que ha llegado un mensaje nuevo del usuario."""
+    def nuevo_turno(self, texto_usuario: str = "", es_dueño: bool = True) -> None:
+        """Avisa de que ha llegado un mensaje nuevo del usuario.
+
+        ``es_dueño`` lo decide la capa de voz (ver jarvis.voz.hablante): si
+        hay un verificador de hablante configurado y la grabación de este
+        turno no coincide con la voz enrolada, llega en False."""
         self.turno += 1
         self.ultimo_mensaje_usuario = texto_usuario
+        self.es_dueño_quien_habla = es_dueño
 
-    def registrar(self, nombre: str, descripcion: str, parametros: dict[str, Any]):
+    def registrar(self, nombre: str, descripcion: str, parametros: dict[str, Any],
+                  requiere_dueño: bool = False):
         def decorador(funcion: Callable[..., str]) -> Callable[..., str]:
-            self._registro[nombre] = Herramienta(nombre, descripcion, parametros, funcion)
+            self._registro[nombre] = Herramienta(nombre, descripcion, parametros, funcion, requiere_dueño)
             return funcion
 
         return decorador
@@ -106,6 +126,11 @@ class Herramientas:
         herramienta = self._registro.get(nombre)
         if herramienta is None:
             return f"Herramienta desconocida: {nombre}", True
+        if herramienta.requiere_dueño and not self.es_dueño_quien_habla:
+            return (
+                f"No puedo ejecutar «{nombre}»: la voz de quien lo pidió no es la de "
+                "quien tiene autorizado Jarvis. Decímelo con tu propia voz."
+            ), False
         try:
             return herramienta.funcion(**argumentos), False
         except Exception as error:  # el error vuelve a Claude para que lo explique
@@ -135,6 +160,7 @@ class Herramientas:
             "guardar_nota",
             "Guarda una nota o recordatorio del usuario para consultarlo más tarde.",
             {"texto": {"type": "string", "description": "Contenido de la nota."}},
+            requiere_dueño=True,
         )
         def guardar_nota(texto: str) -> str:
             notas = self._leer_notas()
@@ -165,6 +191,7 @@ class Herramientas:
             "porque si no la llamás Jarvis sigue abierto esperando otro mensaje. No hace "
             "falta confirmar: a diferencia de cerrar otra aplicación, aquí no hay nada que perder.",
             {},
+            requiere_dueño=True,
         )
         def cerrar_jarvis() -> str:
             self.salir_pedido = True
@@ -196,6 +223,7 @@ class Herramientas:
                     "description": "true solo si el usuario ya confirmó que quiere que se guarde esto.",
                 },
             },
+            requiere_dueño=True,
         )
         def recordar(hecho: str, valor: str, confirmado: bool) -> str:
             clave = ("recordar", hecho.strip().lower(), valor.strip().lower())
