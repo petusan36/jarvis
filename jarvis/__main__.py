@@ -72,7 +72,20 @@ def main(argv: list[str] | None = None) -> int:
                         help="Sin efecto propio: el menú para elegir cómo conectar con un "
                              "modelo de IA ya corre siempre, en cada arranque. Se conserva "
                              "solo por compatibilidad con scripts o accesos que lo invoquen.")
+    parser.add_argument("--enrolar-voz", action="store_true",
+                        help="Graba tu voz de referencia para el reconocimiento de hablante "
+                             "(ver jarvis.voz.hablante) y termina. Repetilo para reemplazarla.")
     args = parser.parse_args(argv)
+
+    if args.enrolar_voz:
+        from .voz.hablante import enrolar_voz
+        config = Config.desde_entorno()
+        try:
+            enrolar_voz(config)
+        except RuntimeError as error:
+            print(error, file=sys.stderr)
+            return 1
+        return 0
 
     if args.instalar_app:
         from .escritorio import instalar_app_escritorio
@@ -134,9 +147,11 @@ def _bucle_conversacion(args, config: Config, cerebro, hud: HudNulo) -> int:
     oido = habla = None
     if modo_voz:
         from .voz.oido import Oido
+        verificador, referencia_voz = _cargar_reconocimiento_voz(config)
         oido = Oido(config.modelo_whisper, config.idioma, hud, pulsar=args.pulsar,
                     palabra_activacion=config.palabra_activacion,
-                    sensibilidad=config.sensibilidad_voz)
+                    sensibilidad=config.sensibilidad_voz,
+                    verificador=verificador, referencia_voz=referencia_voz)
         if not args.silencio:
             from .voz.habla import crear_habla
             try:
@@ -171,8 +186,9 @@ def _bucle_conversacion(args, config: Config, cerebro, hud: HudNulo) -> int:
             continue
 
         hud.estado("pensando", texto)
+        es_dueño = oido.es_dueño if oido else True
         try:
-            respuesta = cerebro.responder(texto)
+            respuesta = cerebro.responder(texto, es_dueño)
         except anthropic.APIConnectionError:
             respuesta = "No consigo conectar con mis servidores. Revise la conexión a internet."
         except anthropic.AuthenticationError:
@@ -217,6 +233,27 @@ def _decir(texto: str, habla, hud: HudNulo, oido=None) -> None:
     else:
         habla.decir(texto)
     hud.estado("reposo")
+
+
+def _cargar_reconocimiento_voz(config: Config):
+    """Construye el verificador de hablante (ver jarvis.voz.hablante), solo
+    si está habilitado Y ya hay una voz enrolada (``jarvis --enrolar-voz``).
+    Degrada con gracia a (None, None) en cualquier otro caso — incluido que
+    falte instalar el soporte, o que el modelo no cargue por lo que sea—:
+    Jarvis sigue funcionando sin reconocimiento de hablante, como siempre."""
+    if not config.reconocimiento_voz_habilitado:
+        return None, None
+    from .voz.hablante import VerificadorHablante, cargar_referencia, ruta_referencia
+
+    referencia = cargar_referencia(ruta_referencia(config.carpeta_datos))
+    if referencia is None:
+        return None, None
+    try:
+        verificador = VerificadorHablante(umbral=config.umbral_voz_dueño)
+    except RuntimeError as error:
+        print(f"(reconocimiento de voz: {error})", file=sys.stderr)
+        return None, None
+    return verificador, referencia
 
 
 def _crear_memoria(config: Config):

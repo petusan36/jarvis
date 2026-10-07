@@ -54,9 +54,12 @@ class Cerebro:
         self.proveedor = proveedor or AdaptadorAnthropic()
         self.historial: list[Any] = []
 
-    def responder(self, texto_usuario: str) -> str:
-        """Envía un mensaje del usuario y devuelve la respuesta final en texto."""
-        self.herramientas.nuevo_turno(texto_usuario)
+    def responder(self, texto_usuario: str, es_dueño: bool = True) -> str:
+        """Envía un mensaje del usuario y devuelve la respuesta final en texto.
+
+        ``es_dueño``: ver jarvis.voz.hablante. Por defecto True (modo texto,
+        u voz sin verificador configurado): Jarvis no exige nada."""
+        self.herramientas.nuevo_turno(texto_usuario, es_dueño)
         self.historial.append(TurnoUsuario(texto=texto_usuario))
         sistema = INSTRUCCIONES.format(nombre=self.config.nombre_usuario) + _contexto_memoria(
             self.herramientas.memoria, texto_usuario

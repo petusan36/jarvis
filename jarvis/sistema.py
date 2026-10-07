@@ -128,6 +128,7 @@ def registrar_sistema(h: "Herramientas", carpeta_personal: Path | None = None,
         "Abre un archivo con su aplicación habitual, o una carpeta en el Finder. "
         "La ruta es relativa a la carpeta personal del usuario.",
         {"ruta": {"type": "string", "description": "Por ejemplo 'Documents/informe.pdf' o 'Downloads'."}},
+        requiere_dueño=True,
     )
     def abrir_archivo_o_carpeta(ruta: str) -> str:
         destino = resolver(ruta)
@@ -162,6 +163,7 @@ def registrar_sistema(h: "Herramientas", carpeta_personal: Path | None = None,
         "'Safari', 'Spotify' o 'Visual Studio Code'. Si no la encuentra, prueba con su "
         "nombre en inglés (por ejemplo 'Notes' en lugar de 'Notas').",
         {"nombre": {"type": "string", "description": "Nombre de la aplicación."}},
+        requiere_dueño=True,
     )
     def abrir_aplicacion(nombre: str) -> str:
         comprobar(ejecutar(["open", "-a", nombre.strip()]), f"abrir {nombre}")
@@ -190,6 +192,7 @@ def registrar_sistema(h: "Herramientas", carpeta_personal: Path | None = None,
             "confirmado": {"type": "boolean",
                            "description": "true solo si el usuario ya ha confirmado el cierre."},
         },
+        requiere_dueño=True,
     )
     def cerrar_aplicacion(nombre: str, confirmado: bool) -> str:
         clave = ("cerrar_aplicacion", nombre.strip().lower())

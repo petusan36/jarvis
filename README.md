@@ -245,6 +245,33 @@ voz del actor ni la imita). Habla en español con el modelo multilingüe.
 Puedes elegir otra en <https://elevenlabs.io/app/voice-library> y poner su id
 en `JARVIS_ELEVENLABS_VOZ`.
 
+## Reconocimiento de voz del usuario
+
+Jarvis puede reconocer la voz de su dueño y negarse a ejecutar acciones (abrir
+o cerrar aplicaciones, abrir archivos o páginas web, reproducir música,
+guardar notas o recuerdos, cerrarse a sí mismo) si quien habla no es él —
+responder preguntas o charlar sigue funcionando para cualquiera. Mientras no
+enroles tu voz, Jarvis no exige nada (comportamiento de siempre).
+
+Para activarlo:
+
+```bash
+python -m jarvis --enrolar-voz
+```
+
+Pulsa Enter y hablá sin parar unos 6 segundos (cualquier frase sirve). Jarvis
+guarda tu huella de voz en `~/.jarvis/voz_dueño.npy`. Repetí el comando para
+reemplazarla.
+
+Usa un modelo neuronal local (SpeechBrain ECAPA-TDNN,
+`speechbrain/spkrec-ecapa-voxceleb`), que descarga la primera vez
+(unos 80 MB), igual que Whisper o Kokoro. El umbral de similitud es
+provisional — no se pudo calibrar con voces humanas reales distintas en el
+entorno donde se desarrolló esta función, solo verificar que el modelo carga
+y produce resultados comparables. Si Jarvis rechaza tu propia voz o acepta
+la de otra persona, ajustá `JARVIS_VOZ_UMBRAL` (por defecto `0.75`; más alto
+exige más parecido). Para desactivarlo del todo: `JARVIS_VOZ_RECONOCIMIENTO=0`.
+
 ## Animación (HUD)
 
 En el modo completo (por defecto) ya se abre sola: un arco reactor en el
@@ -423,6 +450,8 @@ Todo se ajusta en el archivo `.env` (mira `.env.example`):
 | `JARVIS_ELEVENLABS_VOZ` | `JBFqnCBsd6RMkjVDRZzb` (George) | Id de voz de <https://elevenlabs.io/app/voice-library> |
 | `JARVIS_ELEVENLABS_MODELO` | `eleven_multilingual_v2` | Modelo de ElevenLabs |
 | `YOUTUBE_API_KEY` | — | Reproduce directo el primer resultado al pedir música; sin ella, abre los resultados |
+| `JARVIS_VOZ_RECONOCIMIENTO` | `1` | `0` desactiva el reconocimiento de voz del usuario del todo |
+| `JARVIS_VOZ_UMBRAL` | `0.75` | Similitud mínima para considerar que es la voz del dueño (ver "Reconocimiento de voz del usuario") |
 
 ## Estructura
 
@@ -434,6 +463,7 @@ jarvis/
 ├── proveedores/     puerto ProveedorIA y adaptadores (Anthropic, Ollama, Codex)
 ├── memoria/         puerto PuertoMemoria + adaptador Graphiti/LadybugDB/Ollama + archivo frío
 ├── herramientas.py  herramientas que el modelo puede usar
+├── autorizacion.py  confirmación en dos pasos para herramientas sensibles (ver roadmap punto 3)
 ├── sistema.py       herramientas de carpetas, aplicaciones y PDFs (macOS)
 ├── musica.py        buscar y reproducir música en YouTube
 ├── web.py           abrir páginas web / buscar en Google
@@ -445,6 +475,7 @@ jarvis/
 │   └── menu.html          página del menú de conexión con IA
 └── voz/
     ├── oido.py      micrófono + Whisper (faster-whisper)
+    ├── hablante.py  reconocimiento de voz del usuario (SpeechBrain ECAPA-TDNN)
     └── habla.py     síntesis de voz (elevenlabs, kokoro, piper, macos, pyttsx3)
 scripts/             build_app.sh + spec de PyInstaller para el bundle standalone
 tests/               pruebas sin red (proveedores/memoria simulados)

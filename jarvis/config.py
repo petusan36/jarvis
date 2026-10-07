@@ -99,6 +99,10 @@ class Config:
     memoria_modelo_llm: str = "qwen3:8b"  # modelo de Ollama para extracción de entidades (graphiti)
     memoria_modelo_embedding: str = "nomic-embed-text"
     memoria_ventana_gracia_dias: int = 180  # cuánto tardan los hechos invalidados en archivarse en frío
+    # Reconocimiento de hablante (ver jarvis.voz.hablante): mientras no haya
+    # voz enrolada (--enrolar-voz), no exige nada, igual que siempre.
+    reconocimiento_voz_habilitado: bool = True
+    umbral_voz_dueño: float = 0.75
 
     @classmethod
     def desde_entorno(cls) -> "Config":
@@ -132,4 +136,8 @@ class Config:
             memoria_ventana_gracia_dias=int(
                 os.getenv("JARVIS_MEMORIA_VENTANA_GRACIA_DIAS", base.memoria_ventana_gracia_dias)
             ),
+            reconocimiento_voz_habilitado=os.getenv(
+                "JARVIS_VOZ_RECONOCIMIENTO", "1" if base.reconocimiento_voz_habilitado else "0"
+            ).lower() in ("1", "true", "si", "sí"),
+            umbral_voz_dueño=float(os.getenv("JARVIS_VOZ_UMBRAL", base.umbral_voz_dueño)),
         )

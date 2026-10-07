@@ -29,6 +29,7 @@ def registrar_musica(h: "Herramientas", clave_youtube: str) -> None:
         "Busca una canción, video o artista en YouTube y lo reproduce. Úsala "
         "cuando el usuario pida escuchar o poner música, una canción o un video.",
         {"busqueda": {"type": "string", "description": "Qué buscar, p. ej. 'Bohemian Rhapsody Queen'."}},
+        requiere_dueño=True,
     )
     def reproducir_musica(busqueda: str) -> str:
         busqueda = busqueda.strip()

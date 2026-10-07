@@ -228,6 +228,8 @@ class _HudFalso:
 
 
 class _OidoFalso:
+    es_dueño = True
+
     def __init__(self, *_args, **_kwargs):
         self._frases = iter(["hola", "salir"])
 

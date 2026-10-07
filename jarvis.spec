@@ -78,6 +78,9 @@ PAQUETES_COLLECT_ALL = [
     "soundfile",
     "curated_transformers",
     "spacy_curated_transformers",
+    "speechbrain",  # reconocimiento de hablante (ver jarvis.voz.hablante)
+    "torchaudio",
+    "hyperpyyaml",
 ]
 
 datas = []
