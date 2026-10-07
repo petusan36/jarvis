@@ -272,6 +272,28 @@ y produce resultados comparables. Si Jarvis rechaza tu propia voz o acepta
 la de otra persona, ajustá `JARVIS_VOZ_UMBRAL` (por defecto `0.75`; más alto
 exige más parecido). Para desactivarlo del todo: `JARVIS_VOZ_RECONOCIMIENTO=0`.
 
+## Cómo te llama Jarvis
+
+Por defecto te dice "señor". Mientras no le hayas dicho tu nombre, lo va a
+preguntar en algún momento natural de la conversación (no en el primer
+mensaje) y, en cuanto lo digas, lo recuerda para siempre — queda guardado en
+`~/.jarvis/.env` (`JARVIS_NOMBRE_USUARIO`), así que sobrevive a que cierres y
+vuelvas a abrir Jarvis, sin necesidad de tener la memoria permanente
+activada. Podés cambiarlo en cualquier momento volviendo a decírselo.
+
+## Modo de escucha pasiva
+
+Decile "duerme" o "descansá por ahora" y Jarvis deja de responder a lo que
+se diga cerca del micrófono hasta que lo nombres de nuevo ("Jarvis, ...") —
+a diferencia de cerrarlo del todo, la app sigue corriendo. En la ventana
+nativa del HUD (macOS), además se oculta mientras duerme y vuelve a
+aparecer al despertarlo.
+
+También entra solo en este modo tras un rato sin que le pidas nada
+(`JARVIS_REPOSO_INACTIVIDAD_SEGUNDOS`, 300 por defecto = 5 minutos; `0`
+desactiva el reposo automático, aunque el pedido explícito con la voz sigue
+funcionando).
+
 ## Animación (HUD)
 
 En el modo completo (por defecto) ya se abre sola: un arco reactor en el
@@ -452,6 +474,7 @@ Todo se ajusta en el archivo `.env` (mira `.env.example`):
 | `YOUTUBE_API_KEY` | — | Reproduce directo el primer resultado al pedir música; sin ella, abre los resultados |
 | `JARVIS_VOZ_RECONOCIMIENTO` | `1` | `0` desactiva el reconocimiento de voz del usuario del todo |
 | `JARVIS_VOZ_UMBRAL` | `0.75` | Similitud mínima para considerar que es la voz del dueño (ver "Reconocimiento de voz del usuario") |
+| `JARVIS_REPOSO_INACTIVIDAD_SEGUNDOS` | `300` | Tras cuánto tiempo sin pedirle nada entra solo en modo de escucha pasiva; `0` lo desactiva |
 
 ## Estructura
 

@@ -30,8 +30,8 @@ alta, así que evita listas largas, tablas, markdown y emojis.
 - Dirígete al usuario como "{nombre}" de vez en cuando, sin abusar.
 - Usa las herramientas disponibles cuando ayuden (hora, cálculos, notas, carpetas, \
 aplicaciones, leer PDFs, reproducir música en YouTube, abrir páginas web, \
-cerrarte a ti mismo). Si ninguna herramienta puede hacer lo que se pide, dilo \
-con franqueza en lugar de inventar.
+entrar en modo de escucha pasiva, cerrarte a ti mismo). Si ninguna herramienta \
+puede hacer lo que se pide, dilo con franqueza en lugar de inventar.
 - Antes de cerrar una aplicación, pregunta siempre al usuario y espera a que confirme. \
 No puedes borrar ni mover archivos: si te lo piden, explica que no tienes permiso.
 - Si una herramienta funciona a medias por falta de configuración (por ejemplo, una \
@@ -41,6 +41,20 @@ y ofrecele explicarle cómo conseguirla, para que la próxima vez funcione compl
 (preferencias, datos personales, rutinas...), usa la herramienta "recordar" para \
 guardarlo. No lo hagas en silencio: solo invocando la herramienta, que el usuario puede \
 ver en la conversación."""
+
+# Mientras nombre_usuario siga en este valor (nadie lo cambió todavía, ni a
+# mano en .env ni con "guardar_nombre"), se le agrega a INSTRUCCIONES el
+# pedido de más abajo. Mismo patrón que conexion_ia.py usa para "¿sigue en
+# el valor por defecto?" (ver _crear_adaptador, config.modelo == Config().modelo).
+_NOMBRE_POR_DEFECTO = Config().nombre_usuario
+
+_PEDIR_NOMBRE = (
+    "\n\nTodavía no sabés cómo se llama quien te habla — le decís "
+    f'"{_NOMBRE_POR_DEFECTO}" por defecto, sin que lo haya elegido. En algún momento '
+    "natural de esta conversación (no en el primer mensaje, pero tampoco lo postergues "
+    "mucho) preguntale su nombre o cómo prefiere que lo llames, y en cuanto te lo diga, "
+    'usá la herramienta "guardar_nombre" para recordarlo. No insistas si prefiere no decirlo.'
+)
 
 # Límite de vueltas herramienta→respuesta por mensaje, por si algo entra en bucle.
 MAX_VUELTAS = 10
@@ -64,6 +78,8 @@ class Cerebro:
         sistema = INSTRUCCIONES.format(nombre=self.config.nombre_usuario) + _contexto_memoria(
             self.herramientas.memoria, texto_usuario
         )
+        if self.config.nombre_usuario == _NOMBRE_POR_DEFECTO:
+            sistema += _PEDIR_NOMBRE
 
         for _ in range(MAX_VUELTAS):
             respuesta = self.proveedor.responder(

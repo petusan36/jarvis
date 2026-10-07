@@ -49,3 +49,70 @@ def test_cerrar_jarvis_requiere_dueño(h):
     assert not error
     assert not h.salir_pedido
     assert "no puedo ejecutar" in salida.lower()
+
+
+def test_dormir_jarvis_marca_dormir_pedido(h):
+    h.nuevo_turno("duerme por ahora", es_dueño=True)
+    salida, error = h.ejecutar("dormir_jarvis", {})
+    assert not error
+    assert h.dormir_pedido is True
+    assert "escucha pasiva" in salida.lower()
+
+
+def test_dormir_jarvis_requiere_dueño(h):
+    h.nuevo_turno("duerme", es_dueño=False)
+    salida, error = h.ejecutar("dormir_jarvis", {})
+    assert not error
+    assert h.dormir_pedido is False
+    assert "no puedo ejecutar" in salida.lower()
+
+
+def test_dormir_pedido_arranca_en_false(h):
+    assert h.dormir_pedido is False
+
+
+class _ConfigFalsa:
+    nombre_usuario = "señor"
+
+
+def test_sin_config_no_registra_guardar_nombre(tmp_path):
+    h = Herramientas(tmp_path, sistema=False)  # config=None, como la mayoría de los tests
+    h.nuevo_turno("llamame Pedro")
+    assert h.ejecutar("guardar_nombre", {"nombre": "Pedro"}) == ("Herramienta desconocida: guardar_nombre", True)
+
+
+def test_guardar_nombre_persiste_en_env_y_actualiza_config(tmp_path, monkeypatch):
+    import jarvis.config as config_mod
+
+    monkeypatch.setattr(config_mod, "_RUTA_ENV_POR_DEFECTO", tmp_path / ".env")
+    config = _ConfigFalsa()
+    h = Herramientas(tmp_path, sistema=False, config=config)
+    h.nuevo_turno("llamame Pedro")
+
+    salida, error = h.ejecutar("guardar_nombre", {"nombre": "Pedro"})
+
+    assert not error
+    assert "Pedro" in salida
+    assert config.nombre_usuario == "Pedro"
+    assert "JARVIS_NOMBRE_USUARIO=Pedro" in (tmp_path / ".env").read_text()
+
+
+def test_guardar_nombre_vacio_falla(tmp_path):
+    h = Herramientas(tmp_path, sistema=False, config=_ConfigFalsa())
+    h.nuevo_turno("")
+    assert h.ejecutar("guardar_nombre", {"nombre": "   "})[1] is True
+
+
+def test_guardar_nombre_requiere_dueño(tmp_path, monkeypatch):
+    import jarvis.config as config_mod
+
+    monkeypatch.setattr(config_mod, "_RUTA_ENV_POR_DEFECTO", tmp_path / ".env")
+    config = _ConfigFalsa()
+    h = Herramientas(tmp_path, sistema=False, config=config)
+    h.nuevo_turno("llamame Pedro", es_dueño=False)
+
+    salida, error = h.ejecutar("guardar_nombre", {"nombre": "Pedro"})
+
+    assert not error
+    assert "no puedo ejecutar" in salida.lower()
+    assert config.nombre_usuario == "señor"  # no cambió

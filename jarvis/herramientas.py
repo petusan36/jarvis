@@ -10,6 +10,7 @@ import ast
 import json
 import math
 import operator
+import os
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -18,6 +19,7 @@ from typing import TYPE_CHECKING, Any, Callable
 from .autorizacion import Autorizacion
 
 if TYPE_CHECKING:
+    from .config import Config
     from .memoria.puerto import PuertoMemoria
 
 
@@ -60,6 +62,7 @@ class Herramientas:
         web: bool = True,
         youtube_api_key: str = "",
         memoria: "PuertoMemoria | None" = None,
+        config: "Config | None" = None,
     ):
         self.carpeta_datos = carpeta_datos
         self._registro: dict[str, Herramienta] = {}
@@ -90,6 +93,10 @@ class Herramientas:
         # de hablante configurado (ver jarvis.voz.hablante), Jarvis se
         # comporta como siempre, sin exigir nada.
         self.es_dueño_quien_habla = True
+        # El bucle principal revisa esto después de cada respuesta, igual que
+        # salir_pedido: si está en True, pone a Oido en modo de escucha
+        # pasiva (ver jarvis.voz.oido.Oido.dormir) y lo resetea.
+        self.dormir_pedido = False
         self._registrar_basicas()
         if sistema:
             from .sistema import registrar_sistema
@@ -101,6 +108,8 @@ class Herramientas:
             registrar_web(self)
         if memoria is not None:
             self._registrar_memoria(memoria)
+        if config is not None:
+            self._registrar_identidad(config)
 
     def nuevo_turno(self, texto_usuario: str = "", es_dueño: bool = True) -> None:
         """Avisa de que ha llegado un mensaje nuevo del usuario.
@@ -198,6 +207,42 @@ class Herramientas:
         def cerrar_jarvis() -> str:
             self.salir_pedido = True
             return "Cerrando Jarvis."
+
+        @self.registrar(
+            "dormir_jarvis",
+            "Activa el modo de escucha pasiva: Jarvis deja de responder a lo que se "
+            "diga hasta que lo vuelvan a nombrar (decir 'Jarvis'). Llamala cuando el "
+            "usuario pida explícitamente que se quede callado, que 'duerma' o "
+            "'descanse' por ahora — a diferencia de cerrar_jarvis, la app sigue "
+            "corriendo y vuelve a escuchar normal en cuanto lo nombren.",
+            {},
+            requiere_dueño=True,
+        )
+        def dormir_jarvis() -> str:
+            self.dormir_pedido = True
+            return "Entrando en modo de escucha pasiva. Decí «Jarvis» cuando quieras que vuelva."
+
+    def _registrar_identidad(self, config: "Config") -> None:
+        @self.registrar(
+            "guardar_nombre",
+            "Guarda cómo quiere que le hables al usuario (su nombre o cómo prefiere "
+            "que lo llames) para dirigirte así a él en esta y en futuras conversaciones. "
+            "Llamala en cuanto te lo diga, sin pedir confirmación — no es información "
+            "sensible, y el usuario puede cambiarlo en cualquier momento volviendo a "
+            "decírtelo.",
+            {"nombre": {"type": "string", "description": "Cómo dirigirte al usuario, p. ej. 'Pedro' o 'jefe'."}},
+            requiere_dueño=True,
+        )
+        def guardar_nombre(nombre: str) -> str:
+            nombre = nombre.strip()
+            if not nombre:
+                raise ValueError("decime qué nombre guardar")
+            from .config import guardar_en_env
+
+            guardar_en_env("JARVIS_NOMBRE_USUARIO", nombre)
+            os.environ["JARVIS_NOMBRE_USUARIO"] = nombre
+            config.nombre_usuario = nombre
+            return f"Listo, te voy a llamar {nombre} de ahora en más."
 
     def _registrar_memoria(self, memoria: "PuertoMemoria") -> None:
         @self.registrar(

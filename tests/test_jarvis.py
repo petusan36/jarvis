@@ -229,9 +229,11 @@ class _HudFalso:
 
 class _OidoFalso:
     es_dueño = True
+    instancias_kwargs: list = []  # última construcción: qué kwargs recibió (para inspeccionar el wiring)
 
     def __init__(self, *_args, **_kwargs):
         self._frases = iter(["hola", "salir"])
+        type(self).instancias_kwargs.append(_kwargs)
 
     def escuchar(self):
         return next(self._frases)
@@ -288,6 +290,35 @@ def test_usa_ventana_nativa_si_esta_disponible_en_macos(monkeypatch, tmp_path):
     assert len(llamadas) == 1 and llamadas[0] == _HudFalso.url
 
 
+def test_ventana_nativa_conecta_ocultar_y_mostrar_a_oido(monkeypatch, tmp_path):
+    """El modo de escucha pasiva (dormir_jarvis) debe poder ocultar/mostrar
+    la ventana nativa: _ejecutar tiene que pasarle a Oido las funciones
+    reales de ventana_macos, no dejarlas en el no-op por defecto."""
+    cliente = ClienteFalso([NS(stop_reason="end_turn", content=[texto("Todo en orden, señor.")])])
+    monkeypatch.setenv("JARVIS_CARPETA_DATOS", str(tmp_path))
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "prueba")
+    monkeypatch.setattr("jarvis.proveedores.anthropic_adaptador.anthropic.Anthropic", lambda: cliente)
+    monkeypatch.setattr("sys.platform", "darwin")
+    monkeypatch.setattr("jarvis.hud.ventana_macos.disponible", lambda: True)
+    monkeypatch.setattr("jarvis.__main__.Hud", _HudFalso)
+    _OidoFalso.instancias_kwargs = []
+    monkeypatch.setattr("jarvis.voz.oido.Oido", _OidoFalso)
+    monkeypatch.setattr("jarvis.voz.habla.crear_habla", lambda _config: _HablaFalsa())
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.setattr("jarvis.conexion_ia._menu_conexion_ia", lambda: "api")
+    monkeypatch.setattr(
+        "jarvis.hud.ventana_macos.ejecutar_con_ventana_flotante",
+        lambda _url, trabajo: trabajo(),
+    )
+
+    assert main([]) == 0
+    assert len(_OidoFalso.instancias_kwargs) == 1
+    kwargs = _OidoFalso.instancias_kwargs[0]
+    assert kwargs["al_dormir"].__module__.endswith("ventana_macos")
+    assert kwargs["al_dormir"].__name__ == "ocultar_ventana"
+    assert kwargs["al_despertar"].__name__ == "mostrar_ventana"
+
+
 def test_sin_hud_mantiene_modo_voz(monkeypatch, tmp_path):
     _HudFalso.instancias = 0
     cliente = ClienteFalso([NS(stop_reason="end_turn", content=[texto("Todo en orden, señor.")])])
@@ -317,6 +348,38 @@ def test_bucle_conversacion_acepta_oido_y_habla_inyectados(tmp_path):
     oido, habla = _OidoFalso(), _HablaFalsa()
 
     assert _bucle_conversacion(args, config, cerebro, _HudFalso(), oido=oido, habla=habla) == 0
+
+
+def test_dormir_pedido_hace_que_el_bucle_llame_a_oido_dormir(tmp_path):
+    """Integración real: la herramienta "dormir_jarvis" (ejecutada de
+    verdad, no simulada) deja dormir_pedido=True en Herramientas;
+    _bucle_conversacion debe notarlo y llamar oido.dormir(), y resetear
+    el flag para no repetirlo en el turno siguiente."""
+    from jarvis.__main__ import _bucle_conversacion
+
+    config = Config(carpeta_datos=tmp_path)
+    args = NS(texto=False, pulsar=False, silencio=False)
+    herramientas = Herramientas(tmp_path)
+
+    def responder_falso(_texto, es_dueño):
+        herramientas.ejecutar("dormir_jarvis", {})  # como si el modelo hubiera llamado la herramienta
+        return "Entrando en modo de escucha pasiva."
+
+    cerebro = NS(herramientas=herramientas, responder=responder_falso)
+
+    class _OidoQueCuentaDormir(_OidoFalso):
+        def __init__(self):
+            super().__init__()
+            self.dormido = False
+
+        def dormir(self):
+            self.dormido = True
+
+    oido = _OidoQueCuentaDormir()
+
+    assert _bucle_conversacion(args, config, cerebro, _HudFalso(), oido=oido, habla=_HablaFalsa()) == 0
+    assert oido.dormido is True
+    assert herramientas.dormir_pedido is False
 
 
 # --- modo suscripción (Claude Agent SDK) -------------------------------------

@@ -103,6 +103,11 @@ class Config:
     # voz enrolada (--enrolar-voz), no exige nada, igual que siempre.
     reconocimiento_voz_habilitado: bool = True
     umbral_voz_dueño: float = 0.75
+    # Modo de escucha pasiva (ver jarvis.voz.oido.Oido.dormir): tras este
+    # tiempo sin una frase real dirigida a Jarvis, entra solo en reposo y
+    # solo vuelve a atender si lo nombrás. 0 desactiva el reposo automático
+    # (el pedido explícito con la herramienta "dormir_jarvis" sigue andando).
+    segundos_reposo_inactividad: float = 300.0
 
     @classmethod
     def desde_entorno(cls) -> "Config":
@@ -140,4 +145,7 @@ class Config:
                 "JARVIS_VOZ_RECONOCIMIENTO", "1" if base.reconocimiento_voz_habilitado else "0"
             ).lower() in ("1", "true", "si", "sí"),
             umbral_voz_dueño=float(os.getenv("JARVIS_VOZ_UMBRAL", base.umbral_voz_dueño)),
+            segundos_reposo_inactividad=float(
+                os.getenv("JARVIS_REPOSO_INACTIVIDAD_SEGUNDOS", base.segundos_reposo_inactividad)
+            ),
         )

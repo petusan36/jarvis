@@ -16,7 +16,7 @@ import os
 from contextlib import aclosing
 from typing import Any
 
-from .cerebro import INSTRUCCIONES, MAX_VUELTAS
+from .cerebro import INSTRUCCIONES, MAX_VUELTAS, _NOMBRE_POR_DEFECTO, _PEDIR_NOMBRE
 from .config import Config
 from .herramientas import Herramientas
 
@@ -75,8 +75,11 @@ class CerebroSuscripcion:
         nombres = [f"mcp__{SERVIDOR}__{d['name']}" for d in self.herramientas.definiciones()]
         # Sin clave en el entorno, Claude Code usa la sesión de tu suscripción.
         os.environ.pop("ANTHROPIC_API_KEY", None)
+        sistema = INSTRUCCIONES.format(nombre=self.config.nombre_usuario)
+        if self.config.nombre_usuario == _NOMBRE_POR_DEFECTO:
+            sistema += _PEDIR_NOMBRE
         opciones = ClaudeAgentOptions(
-            system_prompt=INSTRUCCIONES.format(nombre=self.config.nombre_usuario),
+            system_prompt=sistema,
             model=self.config.modelo,
             effort=self.config.esfuerzo,
             tools=[],  # sin terminal ni edición de archivos: solo las herramientas de Jarvis

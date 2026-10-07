@@ -369,9 +369,27 @@ def _audio():
     return sd, np
 
 
+_EMOJIS = re.compile(
+    "["
+    "\U0001F300-\U0001FAFF"  # símbolos y pictogramas (incluye emoticonos, objetos, etc.)
+    "\U00002600-\U000027BF"  # símbolos diversos y dingbats (☀, ✂, ➡, etc.)
+    "\U0001F1E6-\U0001F1FF"  # banderas (pares de letras regionales)
+    "\U0000FE0F"  # variation selector (fuerza estilo emoji en el carácter anterior)
+    "\U0000200D"  # zero-width joiner (emojis compuestos, p. ej. familias)
+    "]+"
+)
+
+
 def _limpiar(texto: str) -> str:
-    """Quita el formato Markdown para que no lea asteriscos ni almohadillas."""
+    """Quita el formato Markdown y los emojis para que no se lean en voz alta.
+
+    El system prompt (ver cerebro.INSTRUCCIONES) ya le pide al modelo que no
+    use emojis porque la respuesta se lee en voz alta, pero no siempre lo
+    respeta — esto es la red de seguridad determinística: sin ella, el motor
+    de voz termina pronunciando el glifo (o, con algunos motores, describiendo
+    el carácter) en vez de ignorarlo."""
     texto = re.sub(r"```.*?```", " ", texto, flags=re.S)
     texto = re.sub(r"[*_#`>]+", "", texto)
     texto = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", texto)
+    texto = _EMOJIS.sub("", texto)
     return re.sub(r"\s+", " ", texto).strip()
