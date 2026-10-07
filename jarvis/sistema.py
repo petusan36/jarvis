@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -50,6 +51,26 @@ EXTENSIONES_EJECUTABLES = {".command", ".sh", ".tool", ".terminal", ".scpt", ".w
 # (APFS/HFS+) es insensible a mayúsculas — "library" y "Library" son la
 # MISMA carpeta en disco, aunque "library" == "Library" sea False en Python.
 CARPETAS_PROHIBIDAS_ESCRITURA = {"library"}
+
+# ejecutar_comando pide confirmación SOLO si el comando parece borrar o
+# destruir algo — si el usuario ya pidió la acción con sus propias
+# palabras, confirmarla de nuevo es fricción redundante (decisión
+# explícita del usuario). Límite real, no resuelto: un shell es libre, así
+# que esto es una heurística de palabras clave, nunca exhaustiva — un
+# comando que borre sin usar ninguna de estas palabras (p. ej. un script
+# de Python con os.remove) corre SIN confirmar. No hay forma de detectar
+# "esto borra algo" con certeza sin interpretar semánticamente cualquier
+# comando posible.
+_PATRON_COMANDO_DESTRUCTIVO = re.compile(
+    r"\b(rm|rmdir|del|erase|unlink|shred|mkfs|dd)\b"
+    r"|remove-item|drop\s+table|drop\s+database|truncate\s+table",
+    re.IGNORECASE,
+)
+
+
+def _comando_es_destructivo(comando: str) -> bool:
+    return bool(_PATRON_COMANDO_DESTRUCTIVO.search(comando))
+
 
 CARPETAS_EN_ESPANOL = {
     "escritorio": "Desktop", "documentos": "Documents", "descargas": "Downloads",
@@ -244,10 +265,13 @@ def registrar_sistema(h: "Herramientas", carpeta_personal: Path | None = None,
         "Crea un archivo nuevo (o reemplaza uno existente) dentro de la carpeta personal "
         "del usuario, con el contenido que le pases — por ejemplo, un archivo de código al "
         "armar un proyecto nuevo. La carpeta de destino tiene que existir: si no, creala "
-        "primero (p. ej. con ejecutar_comando: 'mkdir -p ...'). Llamala primero con "
-        "confirmado=false: eso deja la escritura pendiente. Mostrale al usuario la ruta "
-        "EXACTA y el contenido (o un resumen fiel si es muy largo) y esperá su respuesta. "
-        "Solo si en su siguiente mensaje confirma, volvé a llamarla con confirmado=true.",
+        "primero (p. ej. con ejecutar_comando: 'mkdir -p ...'). Si el archivo YA EXISTE, "
+        "reemplazarlo destruye su contenido anterior: llamala primero con confirmado=false "
+        "y pedile aprobación al usuario describiendo la ACCIÓN en términos simples (qué "
+        "archivo y para qué, no la ruta exacta ni el contenido línea por línea — decirlos "
+        "en voz alta es tedioso para quien escucha; solo si te los pide, decíselos), y "
+        "volvé a llamarla con confirmado=true solo si confirma. Si el archivo es NUEVO, no "
+        "hace falta nada de esto: se crea directo.",
         {
             "ruta": {
                 "type": "string",
@@ -256,7 +280,7 @@ def registrar_sistema(h: "Herramientas", carpeta_personal: Path | None = None,
             "contenido": {"type": "string", "description": "Contenido completo del archivo."},
             "confirmado": {
                 "type": "boolean",
-                "description": "true solo si el usuario ya vio la ruta y el contenido y confirmó.",
+                "description": "true solo si el usuario ya aprobó la acción (describiste qué vas a crear, no necesariamente la ruta/contenido exactos).",
             },
         },
         requiere_dueño=True,
@@ -266,17 +290,26 @@ def registrar_sistema(h: "Herramientas", carpeta_personal: Path | None = None,
         rechazar_ruta_sensible(destino)
         if not destino.parent.is_dir():
             raise FileNotFoundError(f"la carpeta {_mostrar(destino.parent)} no existe todavía")
-        # La clave incluye la ruta Y un hash del contenido — igual que
-        # recordar ata hecho+valor, y ejecutar_comando el comando exacto:
-        # sin esto, se podía pedir confirmación mostrando un contenido y
-        # escribir otro distinto en la llamada confirmada (mismo hallazgo
-        # de seguridad ya corregido en crear_habilidad, PR #24).
-        resumen_contenido = hashlib.sha256(contenido.encode("utf-8")).hexdigest()
-        clave = ("escribir_archivo", str(destino), resumen_contenido)
-        if not h.autorizacion.pedir(clave, h.turno, confirmado, h.ultimo_mensaje_usuario):
-            return (f"Escritura de {_mostrar(destino)} pendiente de confirmar. Mostrale al "
-                    "usuario la ruta exacta y el contenido, y esperá su respuesta antes de "
-                    "llamar de nuevo con confirmado=true.")
+        # Solo pide confirmación si YA EXISTE un archivo ahí: reemplazarlo
+        # destruye su contenido anterior. Un archivo nuevo no tiene nada
+        # que perder — si el usuario ya pidió la acción con sus propias
+        # palabras, confirmarla de nuevo es fricción redundante (decisión
+        # explícita del usuario).
+        if destino.is_file():
+            # La clave incluye la ruta Y un hash del contenido — igual que
+            # recordar ata hecho+valor, y ejecutar_comando el comando
+            # exacto: sin esto, se podía pedir confirmación mostrando un
+            # contenido y escribir otro distinto en la llamada confirmada
+            # (mismo hallazgo de seguridad ya corregido en crear_habilidad,
+            # PR #24).
+            resumen_contenido = hashlib.sha256(contenido.encode("utf-8")).hexdigest()
+            clave = ("escribir_archivo", str(destino), resumen_contenido)
+            if not h.autorizacion.pedir(clave, h.turno, confirmado, h.ultimo_mensaje_usuario):
+                return (f"{_mostrar(destino)} ya existe y reemplazarlo destruye su "
+                        "contenido anterior, así que necesito confirmación. Describile al "
+                        "usuario la acción (no necesariamente la ruta/contenido exactos, "
+                        "salvo que te los pida) y esperá su respuesta antes de llamar de "
+                        "nuevo con confirmado=true.")
         destino.write_text(contenido, encoding="utf-8")
         return f"Escrito {_mostrar(destino)} ({len(contenido)} caracteres)."
 
@@ -286,15 +319,19 @@ def registrar_sistema(h: "Herramientas", carpeta_personal: Path | None = None,
         "correr un script, inicializar un proyecto (git init, npm install, etc.). Es la "
         "herramienta de mayor riesgo de todas: puede modificar o borrar cualquier cosa a la "
         "que tu usuario tenga acceso, no solo su carpeta personal. Llamala primero con "
-        "confirmado=false: eso deja el comando pendiente. Mostrale al usuario el comando "
-        "EXACTO que vas a correr y esperá su respuesta. Solo si en su siguiente mensaje "
-        "confirma, volvé a llamarla con confirmado=true. Te devuelve la salida real "
-        "(stdout/stderr/código de salida) para que sepas si funcionó.",
+        "confirmado=false: eso deja el comando pendiente. Pedile aprobación al usuario "
+        "describiendo la ACCIÓN en términos simples (p. ej. 'voy a instalar las "
+        "dependencias del proyecto', no 'voy a correr npm install') — el comando en sí es "
+        "un detalle de implementación de la acción, decirlo en voz alta es tedioso para "
+        "quien escucha. Solo si el usuario te pide el comando exacto, decíselo. Solo si en "
+        "su siguiente mensaje confirma la acción, volvé a llamarla con confirmado=true. Te "
+        "devuelve la salida real (stdout/stderr/código de salida) para que sepas si "
+        "funcionó.",
         {
             "comando": {"type": "string", "description": "El comando completo a ejecutar, p. ej. 'npm install'."},
             "confirmado": {
                 "type": "boolean",
-                "description": "true solo si el usuario ya vio el comando exacto y confirmó.",
+                "description": "true solo si el usuario ya aprobó la acción (describiste qué vas a hacer, no necesariamente el comando exacto).",
             },
         },
         requiere_dueño=True,
@@ -303,11 +340,18 @@ def registrar_sistema(h: "Herramientas", carpeta_personal: Path | None = None,
         comando = comando.strip()
         if not comando:
             raise ValueError("decime qué comando correr")
-        clave = ("ejecutar_comando", comando)
-        if not h.autorizacion.pedir(clave, h.turno, confirmado, h.ultimo_mensaje_usuario):
-            return (f"Comando pendiente de confirmar: {comando}\nMostrale este comando "
-                    "exacto al usuario y esperá su respuesta antes de llamar de nuevo con "
-                    "confirmado=true.")
+        # Solo pide confirmación si el comando parece borrar/destruir algo:
+        # si el usuario ya pidió la acción con sus propias palabras,
+        # confirmarla de nuevo es fricción redundante (decisión explícita
+        # del usuario) — salvo que sea algo destructivo, donde el costo de
+        # un error es mucho más alto.
+        if _comando_es_destructivo(comando):
+            clave = ("ejecutar_comando", comando)
+            if not h.autorizacion.pedir(clave, h.turno, confirmado, h.ultimo_mensaje_usuario):
+                return (f"Esto borra o destruye algo, así que necesito confirmación. "
+                        "Describile al usuario la acción (no necesariamente el comando "
+                        "exacto, salvo que te lo pida) y esperá su respuesta antes de "
+                        "llamar de nuevo con confirmado=true.")
         try:
             resultado = ejecutar_shell(comando, raiz)
         except subprocess.TimeoutExpired:
