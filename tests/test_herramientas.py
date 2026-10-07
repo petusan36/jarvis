@@ -169,13 +169,50 @@ def test_guardar_nombre_requiere_dueño(tmp_path, monkeypatch):
 
 # --- habilidades propias (crear_habilidad / listar_habilidades / leer_habilidad) ---
 
-def test_crear_habilidad_la_guarda_y_queda_listable(h):
+def _crear_habilidad_confirmada(h, nombre="x", descripcion="una habilidad", contenido="el procedimiento"):
+    """El contenido de una habilidad se sigue como instrucción en el
+    futuro: crear_habilidad exige el mismo gate en dos pasos que recordar
+    (ver jarvis.autorizacion), nunca guarda con una sola llamada."""
+    h.nuevo_turno("guardá esto como habilidad")
+    h.ejecutar("crear_habilidad", {
+        "nombre": nombre, "descripcion": descripcion, "contenido": contenido, "confirmado": False,
+    })
+    h.nuevo_turno("sí, guardalo")
+    return h.ejecutar("crear_habilidad", {
+        "nombre": nombre, "descripcion": descripcion, "contenido": contenido, "confirmado": True,
+    })
+
+
+def test_crear_habilidad_sin_confirmar_queda_pendiente_y_no_escribe(h):
     h.nuevo_turno("guardá esto como habilidad")
     salida, error = h.ejecutar("crear_habilidad", {
-        "nombre": "resumen-pdf-largo",
-        "descripcion": "Cómo resumir un PDF largo en partes",
-        "contenido": "1. Leer el PDF.\n2. Resumir cada sección.\n3. Combinar los resúmenes.",
+        "nombre": "x", "descripcion": "algo", "contenido": "algo", "confirmado": False,
     })
+    assert not error
+    assert "pendiente" in salida.lower()
+    salida_listado, _ = h.ejecutar("listar_habilidades", {})
+    assert "No tengo ninguna habilidad" in salida_listado
+
+
+def test_crear_habilidad_confirmada_en_el_mismo_turno_no_escribe(h):
+    """Solo vale una confirmación dada en un mensaje POSTERIOR al pedido —
+    igual que recordar y cerrar_aplicacion."""
+    h.nuevo_turno("guardá esto como habilidad")
+    h.ejecutar("crear_habilidad", {
+        "nombre": "x", "descripcion": "algo", "contenido": "algo", "confirmado": False,
+    })
+    salida, error = h.ejecutar("crear_habilidad", {
+        "nombre": "x", "descripcion": "algo", "contenido": "algo", "confirmado": True,
+    })
+    assert not error
+    assert "pendiente" in salida.lower()
+
+
+def test_crear_habilidad_confirmada_la_guarda_y_queda_listable(h):
+    salida, error = _crear_habilidad_confirmada(
+        h, "resumen-pdf-largo", "Cómo resumir un PDF largo en partes",
+        "1. Leer el PDF.\n2. Resumir cada sección.\n3. Combinar los resúmenes.",
+    )
     assert not error
     assert "resumen-pdf-largo" in salida
 
@@ -185,19 +222,15 @@ def test_crear_habilidad_la_guarda_y_queda_listable(h):
 
 
 def test_leer_habilidad_devuelve_el_procedimiento_completo(h):
-    h.nuevo_turno("")
-    h.ejecutar("crear_habilidad", {
-        "nombre": "x", "descripcion": "una habilidad", "contenido": "el procedimiento",
-    })
+    _crear_habilidad_confirmada(h, "x", "una habilidad", "el procedimiento")
     salida, error = h.ejecutar("leer_habilidad", {"nombre": "x"})
     assert not error
     assert salida == "el procedimiento"
 
 
 def test_crear_habilidad_de_nuevo_con_el_mismo_nombre_la_mejora(h):
-    h.nuevo_turno("")
-    h.ejecutar("crear_habilidad", {"nombre": "x", "descripcion": "v1", "contenido": "viejo"})
-    h.ejecutar("crear_habilidad", {"nombre": "x", "descripcion": "v2", "contenido": "nuevo"})
+    _crear_habilidad_confirmada(h, "x", "v1", "viejo")
+    _crear_habilidad_confirmada(h, "x", "v2", "nuevo")
 
     salida, _ = h.ejecutar("leer_habilidad", {"nombre": "x"})
     assert salida == "nuevo"
@@ -208,7 +241,7 @@ def test_crear_habilidad_de_nuevo_con_el_mismo_nombre_la_mejora(h):
 def test_crear_habilidad_requiere_dueño(h):
     h.nuevo_turno("guardá esto", es_dueño=False)
     salida, error = h.ejecutar("crear_habilidad", {
-        "nombre": "x", "descripcion": "algo", "contenido": "algo",
+        "nombre": "x", "descripcion": "algo", "contenido": "algo", "confirmado": False,
     })
     assert not error
     assert "no puedo ejecutar" in salida.lower()
@@ -224,8 +257,5 @@ def test_listar_habilidades_no_requiere_dueño(h):
 
 
 def test_crear_habilidad_con_nombre_invalido_falla(h):
-    h.nuevo_turno("")
-    salida, error = h.ejecutar("crear_habilidad", {
-        "nombre": "   ", "descripcion": "algo", "contenido": "algo",
-    })
+    salida, error = _crear_habilidad_confirmada(h, "   ", "algo", "algo")
     assert error

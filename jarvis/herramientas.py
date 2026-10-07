@@ -314,15 +314,32 @@ class Herramientas:
             "forma útil de hacer algo que probablemente se repita, no para algo de una "
             "sola vez. Para mejorar una que ya tenés, llamala de nuevo con el mismo "
             "nombre y el procedimiento actualizado: reemplaza a la anterior entera, no "
-            "la combina. Mostrale al usuario qué guardaste o cambiaste, nunca en silencio.",
+            "la combina. Llamala primero con confirmado=false: eso deja el guardado "
+            "pendiente. Mostrale al usuario el nombre, la descripción Y el procedimiento "
+            "completo antes de guardar nada — nunca en silencio — y esperá su respuesta. "
+            "Solo si en su siguiente mensaje confirma, volvé a llamarla con "
+            "confirmado=true. El contenido de una habilidad se sigue como instrucción en "
+            "el futuro, así que esta confirmación importa más que la de cualquier otra "
+            "herramienta.",
             {
                 "nombre": {"type": "string", "description": "Nombre corto, p. ej. 'resumen-pdf-largo'."},
                 "descripcion": {"type": "string", "description": "Una línea: para qué sirve esta habilidad."},
                 "contenido": {"type": "string", "description": "El procedimiento completo, en tus palabras."},
+                "confirmado": {
+                    "type": "boolean",
+                    "description": "true solo si el usuario ya confirmó, viendo el procedimiento completo.",
+                },
             },
             requiere_dueño=True,
         )
-        def crear_habilidad(nombre: str, descripcion: str, contenido: str) -> str:
+        def crear_habilidad(nombre: str, descripcion: str, contenido: str, confirmado: bool) -> str:
+            clave = ("crear_habilidad", nombre.strip().lower())
+            if not self.autorizacion.pedir(clave, self.turno, confirmado, self.ultimo_mensaje_usuario):
+                return (
+                    f"Guardar la habilidad «{nombre}» pendiente de confirmar. Mostrale al "
+                    "usuario el nombre, la descripción y el procedimiento completo, y "
+                    "esperá su respuesta antes de llamar de nuevo con confirmado=true."
+                )
             ruta = guardar_habilidad(carpeta, nombre, descripcion, contenido)
             return f"Habilidad «{ruta.stem}» guardada: {descripcion}"
 

@@ -182,9 +182,13 @@ flowchart TB
     memoria, el contenido SÍ está pensado para seguirse como instrucción
     (por eso la carga en dos niveles: solo el resumen va siempre en el
     prompt; el procedimiento completo se lee bajo demanda con
-    `leer_habilidad`, y nunca se crea sin que sea la voz del dueño).
-    Llamar a `crear_habilidad` de nuevo con el mismo nombre la reemplaza
-    entera — así es como Jarvis "mejora" una habilidad existente.
+    `leer_habilidad`, y nunca se crea sin que sea la voz del dueño). Por
+    eso `crear_habilidad` exige el mismo gate en dos pasos que `recordar`
+    (`Autorizacion.pedir`, nunca guarda con una sola llamada): el contenido
+    se va a seguir como instrucción en el futuro, así que la confirmación
+    importa más acá que en cualquier otra herramienta. Llamarla de nuevo
+    con el mismo nombre (confirmada otra vez) reemplaza la habilidad
+    entera — así es como Jarvis "mejora" una existente.
   - Las dos reusan el mismo gate de autorización (`requiere_dueño`): nadie
     más que el dueño puede hacer que Jarvis aprenda algo o cambie cómo hace
     las cosas.
