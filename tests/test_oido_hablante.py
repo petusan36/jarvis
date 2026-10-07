@@ -45,6 +45,9 @@ def test_voz_no_coincide():
     assert oido._coincide_con_dueño(audio=object()) is False
 
 
-def test_si_el_verificador_falla_no_bloquea_a_jarvis():
+def test_si_el_verificador_falla_falla_cerrado_no_abierto():
+    """El audio lo controla quien habla: un error del verificador (p. ej. una
+    grabación corrupta a propósito) no debe tratarse como "sí es el dueño" —
+    sería una forma trivial de saltarse el gate de requiere_dueño."""
     oido = _oido_sin_init(verificador=_VerificadorQueFalla(), referencia_voz=object())
-    assert oido._coincide_con_dueño(audio=object()) is True
+    assert oido._coincide_con_dueño(audio=object()) is False

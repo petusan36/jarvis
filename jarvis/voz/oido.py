@@ -129,7 +129,13 @@ class Oido:
         try:
             return self.verificador.coincide(audio, self.referencia_voz)
         except Exception:
-            return True  # el reconocimiento de hablante es un extra: si falla, no bloquea a Jarvis
+            # Fallo cerrado, no abierto: el audio lo controla quien habla, así
+            # que un error del verificador (p. ej. una grabación corrupta a
+            # propósito) NO debe tratarse como "sí es el dueño" — eso sería
+            # una forma trivial de saltarse el gate de las herramientas que
+            # requieren su voz. Al no ser el dueño, Jarvis solo le niega esas
+            # acciones; sigue respondiendo preguntas con normalidad.
+            return False
 
     def vigilar_interrupcion(self, palabra: str, detener_vigia: threading.Event,
                              al_detectar) -> threading.Event:
