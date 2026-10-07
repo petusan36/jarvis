@@ -1,11 +1,19 @@
 # J.A.R.V.I.S.
 
 Asistente personal por voz inspirado en el Jarvis de Iron Man. Te escucha con
-**Whisper**, piensa con **Claude** (que puede usar herramientas) y te responde
-**hablando**. También tiene un **modo texto** para probarlo sin micrófono.
+**Whisper**, piensa con un modelo de IA (que puede usar herramientas) y te
+responde **hablando**. También tiene un **modo texto** para probarlo sin
+micrófono.
+
+Elegís de dónde viene la IA en el menú de cada arranque — sin pegar ninguna
+clave en ningún caso:
+
+- **Local (Ollama)**: corre entero en tu máquina, sin internet ni cuenta de nadie.
+- **Claude**: tu suscripción Pro/Max, vía Claude Code.
+- **Codex/OpenAI**: tu sesión de ChatGPT, vía Codex CLI.
 
 ```
-micrófono ──► Whisper (oido.py) ──► Claude + herramientas (cerebro.py) ──► voz (habla.py)
+micrófono ──► Whisper (oido.py) ──► modelo de IA + herramientas (cerebro.py) ──► voz (habla.py)
                                       │
                                       └── fecha y hora, calculadora, notas, carpetas, apps…
 ```
@@ -30,9 +38,18 @@ micrófono ──► Whisper (oido.py) ──► Claude + herramientas (cerebro.
 > | Ubuntu / Debian | `sudo apt install python3.12 python3.12-venv` |
 > | Windows | instala 3.12 desde <https://python.org/downloads> (marca "Add to PATH") |
 
-- Una de estas dos formas de conectar con Claude:
-  - **Clave de API** (pago por uso): créala en <https://console.anthropic.com>
-  - **Tu suscripción Pro o Max**, a través de Claude Code (ver más abajo)
+- Una de estas tres formas de conectar con un modelo de IA (elegís en el menú,
+  no hace falta decidir ahora):
+  - **Local, sin cuenta ni clave**: instalá [Ollama](https://ollama.com) y
+    bajá un modelo — ver [Modelo local (Ollama)](#modelo-local-ollama) más
+    abajo.
+  - **Tu suscripción Claude Pro/Max**, a través de Claude Code (`claude`
+    instalado, `/login` hecho).
+  - **Tu sesión de ChatGPT**, a través de Codex CLI (`npm install -g
+    @openai/codex`, `codex login` hecho).
+  - (Alternativa menos recomendada: clave de API de Anthropic, de pago por
+    uso, en <https://console.anthropic.com> — no pasa por el menú, se pone
+    directo en `.env`.)
 - **espeak-ng**, para que Kokoro pueda hablar español (ver tabla más abajo)
 
 ## Instalación
@@ -61,34 +78,68 @@ Si al instalar ves `ERROR: Could not find a version that satisfies the
 requirement kokoro`, tu `.venv` quedó creado con una versión de Python
 equivocada: borralo (`rm -rf .venv`) y repetí desde `python3.12 -m venv .venv`.
 
-## Conectar con Claude: clave de API o suscripción
+## Modelo local (Ollama)
+
+Si vas a usar **Local** en el menú, instalá [Ollama](https://ollama.com) y
+bajá al menos un modelo ANTES de arrancar Jarvis por primera vez — el menú
+solo lista lo que ya esté instalado, no instala nada por vos:
+
+```bash
+brew install ollama              # macOS (Linux/Windows: https://ollama.com/download)
+ollama serve &                   # si no corre ya como servicio
+ollama pull qwen3:8b             # modelo principal: razonamiento + tool-calling
+ollama pull qwen3-vl:4b          # opcional: visión (todavía sin conectar como herramienta)
+ollama pull nomic-embed-text     # opcional: solo si vas a activar memoria (JARVIS_MEMORIA=1)
+```
+
+`qwen3:8b` es el único imprescindible para que Jarvis funcione en modo local.
+Podés usar otro modelo que ya tengas (cualquiera que Ollama liste), pero sin
+tool-calling real Jarvis no puede usar sus herramientas (hora, notas, etc.).
+
+## Conectar con un modelo de IA: el menú de cada arranque
 
 ```bash
 python -m jarvis
 ```
 
-Al primer arranque, Jarvis valida solo cómo conectar con Claude:
+En **todo** arranque normal (sin `--instalar-app`) Jarvis te pregunta, con un
+menú de dos niveles, cómo conectar con un modelo de IA — no solo la primera
+vez: así podés cambiar de proveedor sin pasar ningún flag.
 
-- Si encuentra `ANTHROPIC_API_KEY` en tu entorno o `.env`, usa la API.
-- Si detecta que ya iniciaste sesión en Claude Code (`claude` → `/login`), usa
-  tu suscripción Pro/Max.
-- Si no encuentra ninguna de las dos, te pregunta ahí mismo:
-  1. **Clave de API**: la pegas y queda activa solo para esta ejecución, en
-     memoria — no se guarda en ningún archivo. Te la va a volver a pedir la
-     próxima vez. Si no quieres repetirlo, ponla vos mismo en `.env`.
-  2. **Suscripción Pro/Max**: el soporte ya está instalado (no es un extra
-     aparte); solo falta que inicies sesión, algo que pip no puede hacer por
-     vos:
-     ```bash
-     npm install -g @anthropic-ai/claude-code   # o el instalador de https://claude.com/claude-code
-     claude                                      # dentro, escribe /login e inicia sesión con tu cuenta
-     ```
-     Hazlo y vuelve a ejecutar `python -m jarvis`.
+1. **Nivel 1**: ¿modelo local o proveedor en la nube?
+2. **Nivel 2** (solo si elegís proveedor): ¿OpenAI (Codex) o Anthropic (Claude)?
 
-Una vez configurado cualquiera de los dos, Jarvis lo detecta solo en cada
-arranque (o fuérzalo con `JARVIS_MOTOR=api` / `JARVIS_MOTOR=suscripcion`).
+- **Local (Ollama)**: lista los modelos que ya tengas instalados y elegís uno.
+- **OpenAI / Codex**: usa la sesión de Codex CLI. Si todavía no iniciaste
+  sesión, Jarvis mismo ejecuta `codex login` (hereda la terminal para que
+  completes el inicio de sesión en el navegador), espera a que termine y
+  recién ahí arranca.
+- **Anthropic / Claude**: usa tu suscripción Pro/Max a través de Claude Code.
+  Si no hay sesión, Jarvis abre `claude` (la propia CLI interactiva — Claude
+  Code no tiene, al momento de escribir esto, un subcomando de login no
+  interactivo): dentro, escribe `/login`, completa el inicio de sesión y
+  salí con `/exit` o Ctrl+D para volver. Jarvis espera a que ese proceso
+  termine y verifica que la sesión quedó activa antes de arrancar.
 
-Ten en cuenta:
+Ninguna opción pide ni guarda una clave de API: solo se persiste en `.env` la
+elección en sí (qué motor usar, qué modelo local), nunca un secreto. La
+clave directa de Anthropic (`ANTHROPIC_API_KEY`) sigue funcionando si la
+ponés vos mismo en `.env` y elegís Anthropic en el menú (o la sesión de
+Claude Code), pero el menú ya no la pide ni la pega por vos.
+
+El menú se muestra por terminal (`input()`/`print()`) si hay una terminal
+interactiva de verdad. Si no (ej. doble clic en el ícono de escritorio, sin
+terminal) pero hay entorno gráfico disponible (hoy: macOS con PyObjC), se
+muestra en cambio una ventana nativa con el mismo menú de 2 niveles: elegir
+modelo local o proveedor, y si hace falta loguearse, se abre una Terminal.app
+visible con `claude`/`codex login` mientras la ventana espera y pollea hasta
+detectar la sesión activa. Sin terminal ni entorno gráfico, no hay forma de
+mostrar el menú y Jarvis falla con un mensaje claro.
+
+`--reconfigurar-ia` ya no tiene efecto propio (el menú corre siempre); se
+conserva solo por compatibilidad con scripts o accesos existentes.
+
+Ten en cuenta, solo si elegís **Claude (suscripción)**:
 
 - **Es solo para uso personal en tu equipo.** Las condiciones de Anthropic
   permiten usar tu suscripción con Claude Code y el Agent SDK para uso
@@ -100,6 +151,8 @@ Ten en cuenta:
 - Jarvis desactiva las herramientas propias de Claude Code (terminal, editar
   archivos): solo puede usar las suyas.
 
+(Local y Codex/OpenAI no tienen estas limitaciones particulares.)
+
 ## Modo completo (por defecto): voz + HUD
 
 ```bash
@@ -110,11 +163,17 @@ Sin ningún flag arranca todo junto: te escucha, te responde hablando y abre en
 el navegador la animación estilo Jarvis ([ver más abajo](#animación-hud)).
 
 Jarvis te escucha siempre: habla cuando quieras y, en cuanto hagas una pausa de
-menos de un segundo, entiende que has terminado y responde. Mientras él habla
-el micrófono se apaga, así que no se escucha a sí mismo. Di **salir** o pulsa
-**Ctrl+C** para terminar. La primera vez se descarga el modelo de Whisper
-(`small`, unos 500 MB).
+menos de un segundo, entiende que has terminado y responde. Di **salir** o
+pulsa **Ctrl+C** para terminar. La primera vez se descarga el modelo de
+Whisper (`small`, unos 500 MB).
 
+- **Interrumpirlo mientras habla**: decí **"Jarvis"** y corta la respuesta al
+  instante (solo con los motores Kokoro, Piper o ElevenLabs — `say` de macOS
+  y pyttsx3 no se pueden cortar a mitad de frase). Sin cancelación de eco: con
+  parlantes el micrófono capta su propia voz mientras habla, así que en
+  teoría podría confundirse con algo que él mismo dijo, aunque es poco común
+  porque sus respuestas casi nunca se nombran a sí mismas. Con auriculares no
+  pasa.
 - **Sin la animación**: `python -m jarvis --sin-hud` — sigue escuchando y
   hablando, solo que no abre el navegador.
 - **Sin voz, solo hablando por texto**: `python -m jarvis --silencio` — te
@@ -186,6 +245,84 @@ voz del actor ni la imita). Habla en español con el modelo multilingüe.
 Puedes elegir otra en <https://elevenlabs.io/app/voice-library> y poner su id
 en `JARVIS_ELEVENLABS_VOZ`.
 
+## Reconocimiento de voz del usuario
+
+Jarvis puede reconocer la voz de su dueño y negarse a ejecutar acciones (abrir
+o cerrar aplicaciones, abrir archivos o páginas web, reproducir música,
+guardar notas o recuerdos, cerrarse a sí mismo) si quien habla no es él —
+responder preguntas o charlar sigue funcionando para cualquiera. Mientras no
+enroles tu voz, Jarvis no exige nada (comportamiento de siempre).
+
+Para activarlo:
+
+```bash
+python -m jarvis --enrolar-voz
+```
+
+Pulsa Enter y hablá sin parar unos 6 segundos (cualquier frase sirve). Jarvis
+guarda tu huella de voz en `~/.jarvis/voz_dueño.npy`. Repetí el comando para
+reemplazarla.
+
+Usa un modelo neuronal local (SpeechBrain ECAPA-TDNN,
+`speechbrain/spkrec-ecapa-voxceleb`), que descarga la primera vez
+(unos 80 MB), igual que Whisper o Kokoro. El umbral de similitud es
+provisional — no se pudo calibrar con voces humanas reales distintas en el
+entorno donde se desarrolló esta función, solo verificar que el modelo carga
+y produce resultados comparables. Si Jarvis rechaza tu propia voz o acepta
+la de otra persona, ajustá `JARVIS_VOZ_UMBRAL` (por defecto `0.75`; más alto
+exige más parecido). Para desactivarlo del todo: `JARVIS_VOZ_RECONOCIMIENTO=0`.
+
+## Cómo te llama Jarvis
+
+Por defecto te dice "señor". Mientras no le hayas dicho tu nombre, lo va a
+preguntar en algún momento natural de la conversación (no en el primer
+mensaje) y, en cuanto lo digas, lo recuerda para siempre — queda guardado en
+`~/.jarvis/.env` (`JARVIS_NOMBRE_USUARIO`), así que sobrevive a que cierres y
+vuelvas a abrir Jarvis, sin necesidad de tener la memoria permanente
+activada. Podés cambiarlo en cualquier momento volviendo a decírselo.
+
+## Modo de escucha pasiva
+
+Decile "duerme" o "descansá por ahora" y Jarvis deja de responder a lo que
+se diga cerca del micrófono hasta que lo nombres de nuevo ("Jarvis, ...") —
+a diferencia de cerrarlo del todo, la app sigue corriendo. En la ventana
+nativa del HUD (macOS), además se oculta mientras duerme y vuelve a
+aparecer al despertarlo.
+
+También entra solo en este modo tras un rato sin que le pidas nada
+(`JARVIS_REPOSO_INACTIVIDAD_SEGUNDOS`, 300 por defecto = 5 minutos; `0`
+desactiva el reposo automático, aunque el pedido explícito con la voz sigue
+funcionando).
+
+## Cómo mejora Jarvis con el tiempo
+
+Dos capas distintas, que no se mezclan:
+
+- **Memoria** (`jarvis/memoria/`, activada por defecto desde esta versión):
+  hechos y preferencias sobre vos — "le gusta el rock", "vive en Córdoba" —
+  guardados con la herramienta "recordar" (pide confirmación antes de
+  guardar nada). Es un grafo temporal (Graphiti + LadybugDB): un hecho que
+  actualiza a otro más viejo lo invalida en vez de dejarlos contradictorios,
+  y lo invalidado se archiva en frío tras un tiempo (`JARVIS_MEMORIA_VENTANA_GRACIA_DIAS`)
+  en vez de crecer sin límite. Se inyecta en cada conversación como DATO,
+  nunca como instrucción — necesita Ollama + `nomic-embed-text`, que ya
+  quedan instalados con el comando único de instalación. Para apagarla:
+  `JARVIS_MEMORIA=0`.
+- **Habilidades** (`jarvis/habilidades.py`): procedimientos que Jarvis
+  descubre y se escribe a sí mismo — "cómo resumir un PDF largo en partes",
+  por ejemplo — con la herramienta "crear_habilidad". Es texto plano, al
+  estilo de un archivo de skill, **nunca código que se ejecute**: Jarvis no
+  genera ni corre programas por su cuenta, y no instala nada por sí mismo.
+  Llamar a "crear_habilidad" de nuevo con el mismo nombre mejora esa
+  habilidad (la reemplaza entera, no la combina). Se cargan en dos niveles:
+  el nombre y para qué sirve cada una están siempre visibles; el
+  procedimiento completo se lee bajo demanda con "leer_habilidad", para no
+  inflar cada conversación con contenido que tal vez no haga falta.
+
+Ambas exigen que sea tu voz la que lo pida (reconocimiento de voz del
+usuario, si lo enrolaste) — nadie más puede hacer que Jarvis aprenda algo
+sobre vos o cambie cómo hace las cosas.
+
 ## Animación (HUD)
 
 En el modo completo (por defecto) ya se abre sola: un arco reactor en el
@@ -202,11 +339,99 @@ python -m jarvis --texto --hud    # modo texto, con HUD
 | En espera | anillos azules girando despacio, el núcleo respira |
 | Escuchando | barras alrededor del anillo que vibran con el volumen del micrófono |
 | Procesando | los anillos aceleran, se vuelven dorados y aparecen órbitas de escaneo |
-| Respondiendo | el núcleo late como si hablara y se muestra la respuesta |
+| Respondiendo | el núcleo late como si hablara |
 
-No necesita instalar nada: Jarvis sirve la página en `http://127.0.0.1:8765`
-(cámbialo con `JARVIS_PUERTO_HUD`). Pulsa F11 en el navegador para verla a
-pantalla completa.
+No necesita instalar nada extra: Jarvis sirve la página en
+`http://127.0.0.1:8765` (cámbialo con `JARVIS_PUERTO_HUD`).
+
+**En macOS**, se abre sola como una ventana flotante nativa: sin marco, sin
+botones, fondo transparente (se ve el escritorio detrás) y sin texto —
+solo los anillos, como un widget que flota sobre todo lo demás. Chica,
+proporcional al tamaño de tu pantalla, y siempre arriba a la izquierda. Se
+puede arrastrar agarrando cualquier parte (no tiene barra de título). No
+aparece en el Dock ni en el selector de apps — para cerrarla, cerrá Jarvis
+(decile "cerrate").
+
+En Windows y Linux, por ahora sigue abriéndose como ventana de Chrome en modo
+app (sin pestañas ni barra de direcciones, pero con el marco normal) o, sin
+Chrome instalado, como pestaña del navegador.
+
+## App de escritorio
+
+El ícono de escritorio es una copia **standalone** de Jarvis, construida con
+[PyInstaller](https://pyinstaller.org/): no depende de este repo, de este
+venv ni de ningún Python instalado en el sistema para arrancar. Si movés o
+borrás el repo clonado, el ícono sigue funcionando — la copia instalada ya
+tiene adentro todo lo que necesita (intérprete, torch, el motor de voz, etc).
+
+### 1. Construir el bundle (una vez por sistema)
+
+```bash
+pip install -e ".[build]"   # instala PyInstaller (herramienta de build, no de runtime)
+scripts/build_app.sh        # tarda varios minutos la primera vez
+```
+
+Esto genera:
+
+- macOS: `dist/Jarvis.app`
+- Windows/Linux: `dist/jarvis/` (carpeta con `jarvis.exe` o el binario `jarvis` adentro)
+
+PyInstaller **no cruza plataformas**: un build hecho en Mac solo corre en
+Mac. Para generar los otros dos, o corré `scripts/build_app.sh` (Linux) /
+`pyinstaller --noconfirm --clean jarvis.spec` (Windows, desde PowerShell) en
+esa máquina, o descargá el artifact ya construido del workflow de CI
+(`.github/workflows/build-app.yml`, corre en una matriz de runners macOS +
+Windows + Linux y sube cada bundle como artifact de GitHub Actions).
+
+**Tamaño aproximado:** el bundle pesa alrededor de **1 GB** (torch y
+transformers, que usa Kokoro para el TTS, son el grueso). Los modelos de voz
+en sí — Whisper ("small", ~500 MB) y las voces de Kokoro/Piper — **no están
+embebidos**: se descargan solos la primera vez que se usan, igual que
+corriendo desde el repo (ver tabla de abajo).
+
+### 2. Instalar el ícono de escritorio
+
+```bash
+python -m jarvis --instalar-app
+```
+
+Copia el bundle ya construido (paso 1) al lugar de escritorio de cada
+sistema. Si todavía no corriste `scripts/build_app.sh`, este comando falla
+con un mensaje claro pidiendo que lo corras primero.
+
+| Sistema | Dónde queda | Qué copia |
+|---|---|---|
+| macOS | `~/Applications/Jarvis.app` (Finder, Launchpad, Spotlight) | `dist/Jarvis.app` completo |
+| Windows | Menú Inicio → Jarvis (lanza `jarvis.exe` directo, sin consola) | `dist/jarvis/` a `%LOCALAPPDATA%\Jarvis\app` |
+| Linux | menú de aplicaciones del escritorio (`~/.local/share/applications`) | `dist/jarvis/` a `~/.local/share/jarvis/app` |
+
+Importante:
+
+- **El ícono de escritorio en macOS sí puede elegir o cambiar de proveedor**,
+  mostrando el menú en una ventana nativa en vez de una terminal (ver más
+  arriba) — requiere PyObjC instalado, igual que la ventana flotante del HUD.
+  En Windows y Linux el ícono todavía no tiene ventana propia para esto: ahí
+  seguí usando el binario del bundle (o `python -m jarvis`) desde una
+  terminal para la primera conexión o para cambiar de proveedor.
+- **macOS puede avisar "desarrollador no identificado"** la primera vez que
+  abras el ícono (no está firmado ni notarizado): clic derecho → Abrir, o
+  `xattr -d com.apple.quarantine ~/Applications/Jarvis.app`.
+- No hay ícono con arte personalizado ni desinstalador todavía — borrar la
+  carpeta instalada a mano alcanza para quitarlo (`rm -rf
+  ~/Applications/Jarvis.app` en macOS; `%LOCALAPPDATA%\Jarvis` + el `.bat`
+  del menú Inicio en Windows; `~/.local/share/jarvis` + el `.desktop` en
+  Linux).
+- Dónde se descargan los modelos en el primer uso real (sin cambios respecto
+  a correr desde el repo):
+
+  | Modelo | Carpeta |
+  |---|---|
+  | Whisper (voz → texto, `faster-whisper`) | caché de huggingface (`~/.cache/huggingface`) |
+  | Kokoro (texto → voz) | caché de huggingface (`~/.cache/huggingface`) |
+  | Piper (texto → voz, alternativa) | `~/.jarvis/voces` |
+
+- Este paso prepara el terreno para que la animación HUD, más adelante, flote
+  directamente en el escritorio en vez de abrirse en una pestaña del navegador.
 
 ## Carpetas y aplicaciones (macOS)
 
@@ -214,6 +439,9 @@ Jarvis puede manejar tu Mac por voz o texto:
 
 - **Carpetas y archivos**: "¿qué hay en Descargas?", "busca la factura de enero",
   "abre la carpeta Documentos" o "abre el informe.pdf".
+- **Leer PDFs**: "leé el informe.pdf de Documentos y resumímelo" — extrae el
+  texto para que Jarvis lo lea, resuma o responda preguntas sobre él (no
+  funciona con PDFs escaneados sin OCR, que no tienen texto real adentro).
 - **Aplicaciones**: "abre Spotify", "¿qué programas tengo abiertos?", "cierra Safari".
 
 Por seguridad:
@@ -221,11 +449,27 @@ Por seguridad:
 - Solo ve lo que hay dentro de tu carpeta personal (`~`), no el resto del disco.
 - No puede borrar ni mover archivos, ni abrir scripts ejecutables.
 - Antes de cerrar una aplicación te pregunta y espera a que digas que sí en tu
-  siguiente mensaje (podrías tener algo sin guardar).
+  siguiente mensaje (podrías tener algo sin guardar). Para cerrar Jarvis mismo
+  no hace falta esa confirmación: decile "cerrate" o "salí" y termina.
 
 La primera vez que liste o cierre aplicaciones, macOS te pedirá permiso para
 que la Terminal controle "System Events" o esa aplicación: acéptalo (se puede
 cambiar en Ajustes del Sistema → Privacidad y seguridad → Automatización).
+
+## Música (YouTube)
+
+"Poné Bohemian Rhapsody" o "buscá música de Serrat" abre YouTube con esa
+búsqueda. Para que reproduzca directo el primer resultado sin que tengas que
+clickear nada, consigue una clave de **YouTube Data API v3** (gratis, con
+cuota) en <https://console.cloud.google.com/apis/library/youtube.googleapis.com>
+y ponla en `YOUTUBE_API_KEY`. Sin ella, igual funciona: abre los resultados y
+elegís vos.
+
+## Navegar por internet
+
+Para lo que no sea específicamente música en YouTube: "abrí Spotify" o
+"buscá las noticias de hoy" abren el navegador — una URL directa si la das,
+o una búsqueda en Google si no.
 
 ## Configuración
 
@@ -234,13 +478,19 @@ Todo se ajusta en el archivo `.env` (mira `.env.example`):
 | Variable | Por defecto | Para qué sirve |
 |---|---|---|
 | `ANTHROPIC_API_KEY` | — | Tu clave de Claude (no hace falta con la suscripción) |
-| `JARVIS_MOTOR` | `auto` | `api`, `suscripcion` o `auto` (API si hay clave, si no la suscripción) |
+| `JARVIS_MOTOR` | `auto` | `api`, `suscripcion` o `codex`. El menú de cada arranque lo elige y lo guarda acá; no hace falta tocarlo a mano. |
+| `JARVIS_PROVEEDOR` | `anthropic` | `anthropic` u `ollama` (solo aplica con `JARVIS_MOTOR=api`) |
+| `JARVIS_OLLAMA_URL` | `http://localhost:11434` | Base de la API local de Ollama, si el proveedor es `ollama` |
 | `JARVIS_NOMBRE_USUARIO` | `señor` | Cómo te llama Jarvis |
-| `JARVIS_MODELO` | `claude-opus-5-5` | Modelo de Claude |
+| `JARVIS_MODELO` | `claude-opus-5-5` | Modelo de IA (Claude, o el que corresponda según el proveedor) |
 | `JARVIS_ESFUERZO` | `low` | `low` responde más rápido; `medium`/`high` piensa más |
 | `JARVIS_MODELO_WHISPER` | `small` | `tiny`, `base`, `small`, `medium`, `large-v3` |
 | `JARVIS_IDIOMA` | `es` | Idioma de escucha y de voz |
-| `JARVIS_CARPETA_DATOS` | `~/.jarvis` | Dónde se guardan las notas |
+| `JARVIS_CARPETA_DATOS` | `~/.jarvis` | Dónde se guardan `.env`, notas y la memoria permanente |
+| `JARVIS_MEMORIA` | `0` | `1` activa la memoria permanente (requiere Ollama + `nomic-embed-text`) |
+| `JARVIS_MEMORIA_MODELO_LLM` | `qwen3:8b` | Modelo de Ollama para extracción de entidades (Graphiti) |
+| `JARVIS_MEMORIA_MODELO_EMBEDDING` | `nomic-embed-text` | Modelo de embeddings, local, sin clave |
+| `JARVIS_MEMORIA_VENTANA_GRACIA_DIAS` | `180` | Cuánto tardan los hechos invalidados en archivarse en frío |
 | `JARVIS_PUERTO_HUD` | `8765` | Puerto local de la animación (`--hud`) |
 | `JARVIS_PALABRA_ACTIVACION` | (vacío) | Si se define (p. ej. `jarvis`), solo responde cuando le llamas |
 | `JARVIS_SENSIBILIDAD_VOZ` | `3` | Cuánto más alto que el ruido de fondo debe sonar la voz |
@@ -250,22 +500,40 @@ Todo se ajusta en el archivo `.env` (mira `.env.example`):
 | `ELEVENLABS_API_KEY` | — | Activa el motor ElevenLabs (de pago) |
 | `JARVIS_ELEVENLABS_VOZ` | `JBFqnCBsd6RMkjVDRZzb` (George) | Id de voz de <https://elevenlabs.io/app/voice-library> |
 | `JARVIS_ELEVENLABS_MODELO` | `eleven_multilingual_v2` | Modelo de ElevenLabs |
+| `YOUTUBE_API_KEY` | — | Reproduce directo el primer resultado al pedir música; sin ella, abre los resultados |
+| `JARVIS_VOZ_RECONOCIMIENTO` | `1` | `0` desactiva el reconocimiento de voz del usuario del todo |
+| `JARVIS_VOZ_UMBRAL` | `0.75` | Similitud mínima para considerar que es la voz del dueño (ver "Reconocimiento de voz del usuario") |
+| `JARVIS_REPOSO_INACTIVIDAD_SEGUNDOS` | `300` | Tras cuánto tiempo sin pedirle nada entra solo en modo de escucha pasiva; `0` lo desactiva |
 
 ## Estructura
 
 ```
 jarvis/
-├── __main__.py      bucle principal (modo texto y modo voz)
-├── cerebro.py       conversación con Claude (API) y ejecución de herramientas
-├── cerebro_suscripcion.py  lo mismo usando tu suscripción (Claude Agent SDK)
-├── herramientas.py  herramientas que Claude puede usar
-├── sistema.py       herramientas de carpetas y aplicaciones (macOS)
-├── config.py        configuración desde .env
-├── hud/             animación estilo Jarvis (servidor local + hud.html)
+├── __main__.py      punto de entrada: CLI, instancia única y bucle principal
+├── conexion_ia.py   menú de conexión con un modelo de IA + login de proveedores en la nube
+├── instancia.py     instancia única (.pid) + redirección de log del bundle standalone
+├── cerebro.py       conversación vía el puerto ProveedorIA + ejecución de herramientas
+├── cerebro_suscripcion.py  lo mismo usando tu suscripción de Claude (Agent SDK)
+├── proveedores/     puerto ProveedorIA y adaptadores (Anthropic, Ollama, Codex)
+├── memoria/         puerto PuertoMemoria + adaptador Graphiti/LadybugDB/Ollama + archivo frío
+├── herramientas.py  herramientas que el modelo puede usar
+├── habilidades.py   habilidades propias que Jarvis se escribe a sí mismo (texto, no código)
+├── autorizacion.py  confirmación en dos pasos para herramientas sensibles (ver roadmap punto 3)
+├── sistema.py       herramientas de carpetas, aplicaciones y PDFs (macOS)
+├── musica.py        buscar y reproducir música en YouTube
+├── web.py           abrir páginas web / buscar en Google
+├── config.py        configuración desde .env (en ~/.jarvis, no en el repo)
+├── escritorio.py    ícono de escritorio (--instalar-app): copia el bundle standalone
+├── hud/             animación estilo Jarvis + menú en ventana nativa (sin tty)
+│   ├── ventana_macos.py   ventana flotante/nativa sin marco (macOS, PyObjC)
+│   ├── servidor_menu.py   servidor HTTP local del menú (token por sesión)
+│   └── menu.html          página del menú de conexión con IA
 └── voz/
     ├── oido.py      micrófono + Whisper (faster-whisper)
+    ├── hablante.py  reconocimiento de voz del usuario (SpeechBrain ECAPA-TDNN)
     └── habla.py     síntesis de voz (elevenlabs, kokoro, piper, macos, pyttsx3)
-tests/               pruebas sin red (cliente de Claude simulado)
+scripts/             build_app.sh + spec de PyInstaller para el bundle standalone
+tests/               pruebas sin red (proveedores/memoria simulados)
 ```
 
 ## Añadir una herramienta

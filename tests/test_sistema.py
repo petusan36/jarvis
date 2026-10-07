@@ -92,15 +92,74 @@ def test_cerrar_aplicacion_exige_confirmacion_en_otro_mensaje(sistema):
     sistema.ejecutar("cerrar_aplicacion", {"nombre": "Safari", "confirmado": True})
     assert sistema.ejecutor.comandos == []
 
-    sistema.nuevo_turno()  # el usuario responde "sí"
+
+    sistema.nuevo_turno("sí")  # el usuario responde "sí"
     salida, error = sistema.ejecutar("cerrar_aplicacion", {"nombre": "safari", "confirmado": True})
     assert not error and "cerrada" in salida
     assert sistema.ejecutor.comandos == [["osascript", "-e", 'tell application "safari" to quit']]
 
 
+def test_cerrar_aplicacion_no_confirma_sin_un_si_real(sistema):
+    """Antes de generalizar la autorización (ver jarvis.autorizacion), esta
+    herramienta no exigía que el mensaje del usuario sonara afirmativo: un
+    confirmado=true alcanzaba, viniera de donde viniera. Mismo caso que
+    protege "recordar" contra una instrucción inyectada."""
+    sistema.ejecutar("cerrar_aplicacion", {"nombre": "Safari", "confirmado": False})
+    sistema.nuevo_turno("¿y qué hora es?")  # turno siguiente, pero no es un sí
+    salida, _ = sistema.ejecutar("cerrar_aplicacion", {"nombre": "Safari", "confirmado": True})
+    assert "pendiente" in salida
+    assert sistema.ejecutor.comandos == []
+
+
+def _pdf_minimo(texto: str) -> bytes:
+    """Arma a mano un PDF válido de una página con el texto dado (sin dependencias)."""
+    objetos = [
+        b"1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n",
+        b"2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n",
+        b"3 0 obj<</Type/Page/Parent 2 0 R/Resources<</Font<</F1 4 0 R>>>>"
+        b"/MediaBox[0 0 200 200]/Contents 5 0 R>>endobj\n",
+        b"4 0 obj<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>endobj\n",
+        f"5 0 obj<</Length {len(texto) + 25}>>\nstream\nBT /F1 24 Tf 20 100 Td ({texto}) Tj ET\n"
+        "endstream\nendobj\n".encode(),
+    ]
+    cuerpo = b"%PDF-1.4\n"
+    offsets = [0]
+    for obj in objetos:
+        offsets.append(len(cuerpo))
+        cuerpo += obj
+    xref = b"xref\n0 6\n0000000000 65535 f \n" + b"".join(
+        f"{off:010d} 00000 n \n".encode() for off in offsets[1:]
+    )
+    trailer = f"trailer<</Size 6/Root 1 0 R>>\nstartxref\n{len(cuerpo)}\n%%EOF".encode()
+    return cuerpo + xref + trailer
+
+
+def test_leer_pdf_extrae_texto(sistema, casa):
+    (casa / "Documents" / "informe.pdf").write_bytes(_pdf_minimo("Hola PDF"))
+    salida, error = sistema.ejecutar("leer_pdf", {"ruta": "Documents/informe.pdf"})
+    assert not error
+    assert "Hola PDF" in salida
+
+
+def test_leer_pdf_rechaza_archivos_que_no_son_pdf(sistema):
+    salida, error = sistema.ejecutar("leer_pdf", {"ruta": "script.command"})
+    assert error
+    assert "no es un PDF" in salida
+
+
+def test_leer_pdf_trunca_texto_largo(sistema, casa, monkeypatch):
+    import jarvis.sistema as sistema_mod
+
+    monkeypatch.setattr(sistema_mod, "MAX_TEXTO_PDF", 5)
+    (casa / "Documents" / "largo.pdf").write_bytes(_pdf_minimo("Hola PDF"))
+    salida, error = sistema.ejecutar("leer_pdf", {"ruta": "Documents/largo.pdf"})
+    assert not error
+    assert "(truncado)" in salida
+
+
 def test_cerrar_aplicacion_escapa_comillas(sistema):
     sistema.ejecutar("cerrar_aplicacion", {"nombre": 'X" to quit\ndo shell script "ls', "confirmado": False})
-    sistema.nuevo_turno()
+    sistema.nuevo_turno("sí")
     sistema.ejecutar("cerrar_aplicacion", {"nombre": 'X" to quit\ndo shell script "ls', "confirmado": True})
     script = sistema.ejecutor.comandos[-1][-1]
     assert script.startswith('tell application "X\\" to quit')

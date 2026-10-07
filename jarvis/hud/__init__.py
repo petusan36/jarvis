@@ -1,19 +1,33 @@
-"""HUD estilo Jarvis: anillos animados en el navegador que reaccionan al estado.
+"""HUD estilo Jarvis: anillos animados que reaccionan al estado.
 
 Solo usa la biblioteca estándar: un pequeño servidor HTTP local sirve la página
 (hud.html, un canvas) y le envía los cambios de estado por Server-Sent Events.
+Se abre como ventana de app (sin pestañas ni barra de direcciones) si hay
+Chrome, Edge o Chromium instalado; si no, cae a una pestaña del navegador.
 """
 
 from __future__ import annotations
 
 import json
 import queue
+import shutil
+import subprocess
+import sys
 import threading
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib import resources
+from pathlib import Path
 
 ESTADOS = {"reposo", "escuchando", "pensando", "hablando"}
+
+NAVEGADORES_APP_MACOS = (
+    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+    "/Applications/Chromium.app/Contents/MacOS/Chromium",
+)
+NAVEGADORES_APP_WINDOWS = ("chrome.exe", "msedge.exe")
+NAVEGADORES_APP_LINUX = ("google-chrome", "chromium", "chromium-browser", "microsoft-edge")
 
 
 class HudNulo:
@@ -30,7 +44,7 @@ class HudNulo:
 
 
 class Hud(HudNulo):
-    """Servidor local del HUD. Abre http://127.0.0.1:<puerto> en el navegador."""
+    """Servidor local del HUD. Lo abre como ventana de app en http://127.0.0.1:<puerto>."""
 
     def __init__(self, puerto: int = 8765, abrir_navegador: bool = True):
         self._clientes: list[queue.Queue] = []
@@ -40,7 +54,7 @@ class Hud(HudNulo):
         self.url = f"http://127.0.0.1:{self._servidor.server_address[1]}/"
         threading.Thread(target=self._servidor.serve_forever, daemon=True).start()
         if abrir_navegador:
-            webbrowser.open(self.url)
+            _abrir_ventana_app(self.url)
 
     def estado(self, nombre: str, texto: str | None = None) -> None:
         """Cambia la animación (reposo, escuchando, pensando o hablando) y, si se da, el texto."""
@@ -131,3 +145,26 @@ def _crear_servidor(puerto: int, hud: Hud) -> ThreadingHTTPServer:
 
 class _Servidor(ThreadingHTTPServer):
     daemon_threads = True  # las conexiones abiertas no impiden salir de Jarvis
+
+
+def _abrir_ventana_app(url: str) -> None:
+    """Ventana sin pestañas ni barra de direcciones si hay Chrome/Edge/Chromium;
+    si no, una pestaña normal del navegador por defecto."""
+    navegador = _navegador_con_modo_app()
+    if navegador:
+        try:
+            subprocess.Popen(
+                [navegador, f"--app={url}", "--window-size=480,480"],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+            return
+        except OSError:
+            pass
+    webbrowser.open(url)
+
+
+def _navegador_con_modo_app() -> str | None:
+    if sys.platform == "darwin":
+        return next((r for r in NAVEGADORES_APP_MACOS if Path(r).is_file()), None)
+    nombres = NAVEGADORES_APP_WINDOWS if sys.platform == "win32" else NAVEGADORES_APP_LINUX
+    return next((shutil.which(n) for n in nombres if shutil.which(n)), None)

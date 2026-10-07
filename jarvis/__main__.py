@@ -1,26 +1,50 @@
-"""Punto de entrada: python -m jarvis [--texto] [--sin-hud] [--silencio] [--pulsar] [--hud].
+"""Punto de entrada: python -m jarvis [--texto] [--sin-hud] [--silencio] [--pulsar] [--hud]
+[--instalar-app] [--reconfigurar-ia].
 
 Por defecto arranca el modo completo: te escucha, te responde hablando y abre
 la animación HUD. Usa --texto para el modo clásico de escribir y leer.
+--instalar-app crea un ícono de escritorio y termina sin arrancar Jarvis.
+
+El menú de conexión con un modelo de IA corre SIEMPRE en cada arranque normal
+(sin --instalar-app), en dos niveles: primero "¿local o proveedor en la
+nube?", y solo si elegís proveedor, "¿OpenAI o Anthropic?". Ya no hay un modo
+que salte el menú porque detecta algo ya configurado en .env o una sesión
+abierta: así podés cambiar de proveedor sin flags extra. Por eso
+--reconfigurar-ia quedó sin efecto propio (el menú ya corre siempre) — se
+conserva el flag solo para no romper scripts o accesos existentes que lo
+invoquen.
+
+Cómo se muestra ese menú depende solo de si hay una terminal interactiva
+real (``sys.stdin.isatty()``), nunca de --texto ni de ningún otro flag: si
+hay tty (ejecutaste `python -m jarvis` a mano, con o sin --texto), el menú
+es por input()/print() en esa misma terminal, como siempre. Si no hay tty
+(ej. doble clic en el ícono de --instalar-app, sin terminal real) pero hay
+entorno gráfico disponible (hoy: macOS con PyObjC), se abre en cambio una
+ventana nativa con el mismo menú de 2 niveles (ver
+``_menu_conexion_ia_ventana`` en ``jarvis.conexion_ia`` y
+``jarvis.hud.servidor_menu``/``jarvis.hud.ventana_macos``). Si no hay ni
+tty ni entorno gráfico, falla con un error claro: no hay forma de
+preguntar nada.
+
+El menú y el login de proveedores en la nube viven en ``jarvis.conexion_ia``;
+el lock de instancia única y la redirección de log del bundle viven en
+``jarvis.instancia`` — ver auditoría de arquitectura hexagonal.
 """
 
 from __future__ import annotations
 
 import argparse
-import getpass
-import os
-import subprocess
 import sys
-from pathlib import Path
+import threading
 
 import anthropic
 
-from .cerebro import Cerebro
 from .config import Config
-from .herramientas import Herramientas
+from .conexion_ia import _crear_cerebro
 from .hud import Hud, HudNulo
+from .instancia import _liberar_instancia, _redirigir_log_si_es_bundle_standalone, _tomar_instancia_unica
 
-SALIR = {"salir", "adiós", "adios", "exit", "quit"}
+SALIR = {"salir", "cerrar", "cierra", "adiós", "adios", "exit", "quit"}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -35,21 +59,53 @@ def main(argv: list[str] | None = None) -> int:
                         help="En modo voz, pulsar Enter para hablar en lugar de escuchar siempre.")
     parser.add_argument("--hud", action="store_true",
                         help="Con --texto, abre igual la animación HUD aunque no haya voz.")
+    parser.add_argument("--instalar-app", action="store_true",
+                        help="Crea un ícono de escritorio para esta instalación y termina.")
+    parser.add_argument("--reconfigurar-ia", action="store_true",
+                        help="Sin efecto propio: el menú para elegir cómo conectar con un "
+                             "modelo de IA ya corre siempre, en cada arranque. Se conserva "
+                             "solo por compatibilidad con scripts o accesos que lo invoquen.")
+    parser.add_argument("--enrolar-voz", action="store_true",
+                        help="Graba tu voz de referencia para el reconocimiento de hablante "
+                             "(ver jarvis.voz.hablante) y termina. Repetilo para reemplazarla.")
     args = parser.parse_args(argv)
 
+    if args.enrolar_voz:
+        from .voz.hablante import enrolar_voz
+        config = Config.desde_entorno()
+        try:
+            enrolar_voz(config)
+        except RuntimeError as error:
+            print(error, file=sys.stderr)
+            return 1
+        return 0
+
+    if args.instalar_app:
+        from .escritorio import instalar_app_escritorio
+        try:
+            print(f"Listo: {instalar_app_escritorio()}")
+        except RuntimeError as error:
+            print(error, file=sys.stderr)
+            return 1
+        return 0
+
     config = Config.desde_entorno()
-    clave_persistente = "ANTHROPIC_API_KEY" in os.environ  # ya venía de .env/entorno real
+    _redirigir_log_si_es_bundle_standalone(config.carpeta_datos)
+    if not _tomar_instancia_unica(config.carpeta_datos):
+        print("Jarvis ya está abierto (otra instancia sigue corriendo).", file=sys.stderr)
+        return 0
+
     try:
-        cerebro = _crear_cerebro(config)
+        cerebro = _crear_cerebro(config, forzar_menu=args.reconfigurar_ia)
     except RuntimeError as error:
         print(error, file=sys.stderr)
         return 1
+    config = cerebro.config  # el menú de configuración puede haber actualizado la elección de IA
 
     try:
         return _ejecutar(args, config, cerebro)
     finally:
-        if not clave_persistente:
-            os.environ.pop("ANTHROPIC_API_KEY", None)  # la del menú no sobrevive a esta ejecución
+        _liberar_instancia(config.carpeta_datos)
 
 
 def _ejecutar(args, config: Config, cerebro) -> int:
@@ -57,17 +113,49 @@ def _ejecutar(args, config: Config, cerebro) -> int:
     usar_hud = (modo_voz and not args.sin_hud) or (not modo_voz and args.hud)
 
     hud = HudNulo()
+    ventana_nativa_url = None
     if usar_hud:
-        hud = Hud(config.puerto_hud)
+        from .hud import ventana_macos
+        nativa = sys.platform == "darwin" and ventana_macos.disponible()
+        hud = Hud(config.puerto_hud, abrir_navegador=not nativa)
         print(f"HUD en {hud.url}")
+        if nativa:
+            ventana_nativa_url = hud.url
 
-    oido = habla = None
+    if ventana_nativa_url:
+        from .hud import ventana_macos
+        resultado = {}
+
+        def trabajo() -> None:
+            resultado["codigo"] = _bucle_conversacion(
+                args, config, cerebro, hud,
+                al_dormir=ventana_macos.ocultar_ventana, al_despertar=ventana_macos.mostrar_ventana,
+            )
+
+        ventana_macos.ejecutar_con_ventana_flotante(ventana_nativa_url, trabajo)
+        return resultado.get("codigo", 0)
+
+    return _bucle_conversacion(args, config, cerebro, hud)
+
+
+def _bucle_conversacion(args, config: Config, cerebro, hud: HudNulo, oido=None, habla=None,
+                        al_dormir=lambda: None, al_despertar=lambda: None) -> int:
+    """``al_dormir``/``al_despertar``: ganchos opcionales para el modo de
+    escucha pasiva (ver jarvis.voz.oido.Oido.dormir y la herramienta
+    "dormir_jarvis") — en modo ventana nativa, ocultan/muestran la ventana
+    del HUD; en cualquier otro caso quedan en no-op."""
+    modo_voz = not args.texto
     if modo_voz:
-        from .voz.oido import Oido
-        oido = Oido(config.modelo_whisper, config.idioma, hud, pulsar=args.pulsar,
-                    palabra_activacion=config.palabra_activacion,
-                    sensibilidad=config.sensibilidad_voz)
-        if not args.silencio:
+        if oido is None:
+            from .voz.oido import Oido
+            verificador, referencia_voz = _cargar_reconocimiento_voz(config)
+            oido = Oido(config.modelo_whisper, config.idioma, hud, pulsar=args.pulsar,
+                        palabra_activacion=config.palabra_activacion,
+                        sensibilidad=config.sensibilidad_voz,
+                        verificador=verificador, referencia_voz=referencia_voz,
+                        segundos_reposo_inactividad=config.segundos_reposo_inactividad,
+                        al_dormir=al_dormir, al_despertar=al_despertar)
+        if not args.silencio and habla is None:
             from .voz.habla import crear_habla
             try:
                 habla = crear_habla(config)
@@ -101,8 +189,9 @@ def _ejecutar(args, config: Config, cerebro) -> int:
             continue
 
         hud.estado("pensando", texto)
+        es_dueño = oido.es_dueño if oido else True
         try:
-            respuesta = cerebro.responder(texto)
+            respuesta = cerebro.responder(texto, es_dueño)
         except anthropic.APIConnectionError:
             respuesta = "No consigo conectar con mis servidores. Revise la conexión a internet."
         except anthropic.AuthenticationError:
@@ -111,11 +200,19 @@ def _ejecutar(args, config: Config, cerebro) -> int:
             respuesta = "Estoy recibiendo demasiadas peticiones. Inténtelo en un momento."
         except anthropic.APIStatusError as error:
             respuesta = f"La API devolvió un error ({error.status_code})."
+        except OSError as error:  # típico de Ollama (no está corriendo) o de Codex (red, sesión vencida)
+            respuesta = f"No consigo hablar con el proveedor de IA ({error})."
         except Exception as error:  # errores del modo suscripción (Claude Code)
             if type(error).__module__.split(".")[0] != "claude_agent_sdk":
                 raise
             respuesta = f"No consigo hablar con Claude Code: {error}"
-        _decir(respuesta, habla, hud)
+        _decir(respuesta, habla, hud, oido)
+        if cerebro.herramientas.dormir_pedido:
+            if oido:
+                oido.dormir()
+            cerebro.herramientas.dormir_pedido = False
+        if cerebro.herramientas.salir_pedido:
+            break
 
     if hasattr(cerebro, "cerrar"):
         cerebro.cerrar()
@@ -124,105 +221,46 @@ def _ejecutar(args, config: Config, cerebro) -> int:
     return 0
 
 
-def _decir(texto: str, habla, hud: HudNulo) -> None:
-    """Muestra la respuesta, anima el HUD mientras se pronuncia y lo deja en reposo."""
+PALABRA_INTERRUPCION = "jarvis"
+
+
+def _decir(texto: str, habla, hud: HudNulo, oido=None) -> None:
+    """Muestra la respuesta, anima el HUD mientras se pronuncia y lo deja en
+    reposo. Si hay oído y el motor de voz se puede cortar a mitad de frase,
+    escucha en paralelo por si dicen "Jarvis" para interrumpirlo."""
     print(f"JARVIS: {texto}")
     hud.estado("hablando", texto)
-    if habla:
+    if not habla:
+        return
+    if oido and habla.interrumpible:
+        detener_vigia = threading.Event()
+        oido.vigilar_interrupcion(PALABRA_INTERRUPCION, detener_vigia, habla.detener)
         habla.decir(texto)
-        hud.estado("reposo")
+        detener_vigia.set()
+    else:
+        habla.decir(texto)
+    hud.estado("reposo")
 
 
-def _crear_cerebro(config: Config):
-    """Elige entre la API (clave) y la suscripción de Claude (Claude Code con tu sesión)."""
-    herramientas = Herramientas(config.carpeta_datos)
-    motor = config.motor
-    if motor == "auto":
-        if _hay_credenciales_api():
-            motor = "api"
-        elif _hay_sesion_claude():
-            motor = "suscripcion"
-        elif sys.stdin.isatty():
-            motor = _menu_activacion()
-        else:
-            raise RuntimeError(
-                "No encuentro cómo conectar con Claude. Elige una opción:\n"
-                "  - Clave de API: copia .env.example como .env y pon tu ANTHROPIC_API_KEY.\n"
-                "  - Suscripción Pro/Max: ejecuta `claude` e inicia sesión con /login."
-            )
-    if motor in ("suscripcion", "suscripción"):
-        from .cerebro_suscripcion import CerebroSuscripcion
-        print("(usando tu suscripción de Claude a través de Claude Code)")
-        return CerebroSuscripcion(config, herramientas)
-    if motor != "api":
-        raise RuntimeError(f"JARVIS_MOTOR no válido: {config.motor} (usa api, suscripcion o auto)")
-    if not _hay_credenciales_api():
-        raise RuntimeError("Falta la clave de Claude. Copia .env.example como .env y pon tu ANTHROPIC_API_KEY.")
+def _cargar_reconocimiento_voz(config: Config):
+    """Construye el verificador de hablante (ver jarvis.voz.hablante), solo
+    si está habilitado Y ya hay una voz enrolada (``jarvis --enrolar-voz``).
+    Degrada con gracia a (None, None) en cualquier otro caso — incluido que
+    falte instalar el soporte, o que el modelo no cargue por lo que sea—:
+    Jarvis sigue funcionando sin reconocimiento de hablante, como siempre."""
+    if not config.reconocimiento_voz_habilitado:
+        return None, None
+    from .voz.hablante import VerificadorHablante, cargar_referencia, ruta_referencia
+
+    referencia = cargar_referencia(ruta_referencia(config.carpeta_datos))
+    if referencia is None:
+        return None, None
     try:
-        return Cerebro(config, herramientas)
-    except anthropic.AnthropicError as error:
-        raise RuntimeError(f"No puedo conectar con Claude: {error}") from error
-
-
-def _menu_activacion() -> str:
-    """Pregunta cómo conectar con Claude cuando no hay clave ni suscripción listas.
-
-    Solo guía, y no persiste nada en disco: la clave que pegues vive solo en
-    esta ejecución (os.environ) y se pierde al cerrar Jarvis. Si no quieres
-    repetirlo cada vez, pon la clave vos mismo en .env.
-    """
-    print("No encuentro cómo conectar con Claude. ¿Cómo quieres activarlo?")
-    print("  1) Ya tengo (o voy a pegar ahora) una clave de API")
-    print("  2) Uso mi suscripción Pro/Max de Claude")
-    try:
-        eleccion = input("Elige 1 o 2: ").strip()
-    except (EOFError, KeyboardInterrupt):
-        eleccion = ""
-
-    if eleccion == "1":
-        clave = getpass.getpass("Pega tu ANTHROPIC_API_KEY (de https://console.anthropic.com): ").strip()
-        if not clave:
-            raise RuntimeError("No diste ninguna clave. Copia .env.example como .env y pon tu ANTHROPIC_API_KEY.")
-        os.environ["ANTHROPIC_API_KEY"] = clave
-        print("(clave activa solo para esta sesión; se pierde al cerrar Jarvis)")
-        return "api"
-
-    if eleccion == "2":
-        if not _hay_sesion_claude():
-            raise RuntimeError(
-                "Todavía no iniciaste sesión. Hazlo y vuelve a ejecutar python -m jarvis:\n"
-                "  claude   (dentro, escribe /login e inicia sesión con tu cuenta)"
-            )
-        print("(usando tu suscripción de Claude)")
-        return "suscripcion"
-
-    raise RuntimeError(
-        "No encuentro cómo conectar con Claude. Elige una opción:\n"
-        "  - Clave de API: copia .env.example como .env y pon tu ANTHROPIC_API_KEY.\n"
-        "  - Suscripción Pro/Max: ejecuta `claude` e inicia sesión con /login."
-    )
-
-
-def _hay_sesion_claude() -> bool:
-    """Mejor esfuerzo: ¿ya hiciste `claude` -> /login? No hay forma 100% fiable
-    de saberlo sin conectar de verdad, así que mira dónde Claude Code guarda
-    la sesión: el llavero en macOS, un archivo en Linux/Windows."""
-    if sys.platform == "darwin":
-        try:
-            resultado = subprocess.run(
-                ["security", "find-generic-password", "-s", "Claude Code-credentials"],
-                capture_output=True, timeout=5,
-            )
-            return resultado.returncode == 0
-        except (OSError, subprocess.TimeoutExpired):
-            return False
-    return (Path.home() / ".claude" / ".credentials.json").is_file()
-
-
-def _hay_credenciales_api() -> bool:
-    """Clave en el entorno o perfil guardado con `ant auth login`."""
-    return bool(os.getenv("ANTHROPIC_API_KEY") or os.getenv("ANTHROPIC_AUTH_TOKEN")
-                or (Path.home() / ".config" / "anthropic").is_dir())
+        verificador = VerificadorHablante(umbral=config.umbral_voz_dueño)
+    except RuntimeError as error:
+        print(f"(reconocimiento de voz: {error})", file=sys.stderr)
+        return None, None
+    return verificador, referencia
 
 
 if __name__ == "__main__":

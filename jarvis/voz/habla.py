@@ -24,6 +24,11 @@ from pathlib import Path
 
 MOTORES = ("elevenlabs", "kokoro", "piper", "macos", "pyttsx3")
 
+# "high" del sistema son ~28ms en muchos Mac: no alcanza para absorber picos de
+# CPU (Kokoro, Chrome del HUD) y se oyen clicks tipo "interferencia". Medio
+# segundo es imperceptible para arrancar a hablar y da mucho más margen.
+LATENCIA_SALIDA = 0.5
+
 # Voz de Piper por defecto: hombre, español de España, tono sereno.
 VOZ_PIPER = "es_ES-davefx-medium"
 # Voz de Kokoro por defecto: "Alex", voz masculina en español (modelo abierto Apache-2.0,
@@ -57,6 +62,16 @@ class Habla:
     @property
     def nombre(self) -> str:
         return self.motores[0].nombre
+
+    @property
+    def interrumpible(self) -> bool:
+        """¿El motor activo se puede cortar a mitad de frase (detener())?"""
+        return bool(self.motores) and hasattr(self.motores[0], "detener")
+
+    def detener(self) -> None:
+        """Corta la reproducción en seco. No hace nada si el motor no lo soporta."""
+        if self.interrumpible:
+            self.motores[0].detener()
 
     def decir(self, texto: str) -> None:
         texto = _limpiar(texto)
@@ -160,8 +175,11 @@ class MotorElevenLabs:
         except urllib.error.HTTPError as error:
             raise RuntimeError(f"ElevenLabs respondió {error.code}") from error
         muestras = self.np.frombuffer(pcm, dtype=self.np.int16)
-        self.sd.play(muestras, self.frecuencia)
+        self.sd.play(muestras, self.frecuencia, latency=LATENCIA_SALIDA)
         self.sd.wait()
+
+    def detener(self) -> None:
+        self.sd.stop()
 
 
 class MotorKokoro:
@@ -186,8 +204,28 @@ class MotorKokoro:
         trozos = [audio for _, _, audio in self.pipeline(texto, voice=self.voz, speed=self.velocidad)]
         if not trozos:
             return
-        self.sd.play(self.np.concatenate(trozos), self.frecuencia)
+        audio = _quitar_clics(self.np.concatenate(trozos), self.np, self.frecuencia)
+        self.sd.play(audio, self.frecuencia, latency=LATENCIA_SALIDA)
         self.sd.wait()
+
+    def detener(self) -> None:
+        self.sd.stop()
+
+
+def _quitar_clics(audio, np, frecuencia: int, umbral: float = 0.3, ventana_ms: float = 6.0):
+    """Alisa saltos bruscos de una sola muestra: artefactos puntuales que a veces
+    produce Kokoro en español (vía el respaldo fonético de espeak-ng), sonando
+    como un click o interferencia. Interpola linealmente una ventana breve
+    alrededor de cada salto; no toca el resto del audio."""
+    saltos = np.where(np.abs(np.diff(audio)) > umbral)[0]
+    if len(saltos) == 0:
+        return audio
+    audio = audio.copy()
+    medio = max(1, int(frecuencia * ventana_ms / 1000 / 2))
+    for i in saltos:
+        inicio, fin = max(0, i - medio), min(len(audio), i + medio + 1)
+        audio[inicio:fin] = np.linspace(audio[inicio], audio[fin - 1], fin - inicio)
+    return audio
 
 
 class MotorPiper:
@@ -208,8 +246,11 @@ class MotorPiper:
         trozos = [t.audio_float_array for t in self.voz.synthesize(texto, syn_config=self.ajustes)]
         if not trozos:
             return
-        self.sd.play(self.np.concatenate(trozos), self.voz.config.sample_rate)
+        self.sd.play(self.np.concatenate(trozos), self.voz.config.sample_rate, latency=LATENCIA_SALIDA)
         self.sd.wait()
+
+    def detener(self) -> None:
+        self.sd.stop()
 
 
 def _modelo_piper(carpeta: Path, voz: str) -> Path:
@@ -328,9 +369,27 @@ def _audio():
     return sd, np
 
 
+_EMOJIS = re.compile(
+    "["
+    "\U0001F300-\U0001FAFF"  # símbolos y pictogramas (incluye emoticonos, objetos, etc.)
+    "\U00002600-\U000027BF"  # símbolos diversos y dingbats (☀, ✂, ➡, etc.)
+    "\U0001F1E6-\U0001F1FF"  # banderas (pares de letras regionales)
+    "\U0000FE0F"  # variation selector (fuerza estilo emoji en el carácter anterior)
+    "\U0000200D"  # zero-width joiner (emojis compuestos, p. ej. familias)
+    "]+"
+)
+
+
 def _limpiar(texto: str) -> str:
-    """Quita el formato Markdown para que no lea asteriscos ni almohadillas."""
+    """Quita el formato Markdown y los emojis para que no se lean en voz alta.
+
+    El system prompt (ver cerebro.INSTRUCCIONES) ya le pide al modelo que no
+    use emojis porque la respuesta se lee en voz alta, pero no siempre lo
+    respeta — esto es la red de seguridad determinística: sin ella, el motor
+    de voz termina pronunciando el glifo (o, con algunos motores, describiendo
+    el carácter) en vez de ignorarlo."""
     texto = re.sub(r"```.*?```", " ", texto, flags=re.S)
     texto = re.sub(r"[*_#`>]+", "", texto)
     texto = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", texto)
+    texto = _EMOJIS.sub("", texto)
     return re.sub(r"\s+", " ", texto).strip()
