@@ -18,6 +18,16 @@ class EjecutorFalso:
         return subprocess.CompletedProcess(comando, self.codigo, self.salida, "")
 
 
+class EjecutorShellFalso:
+    def __init__(self, stdout="ok", stderr="", codigo=0):
+        self.llamadas = []
+        self.stdout, self.stderr, self.codigo = stdout, stderr, codigo
+
+    def __call__(self, comando, carpeta):
+        self.llamadas.append((comando, carpeta))
+        return subprocess.CompletedProcess(comando, self.codigo, self.stdout, self.stderr)
+
+
 @pytest.fixture
 def casa(tmp_path):
     casa = tmp_path / "casa"
@@ -35,8 +45,10 @@ def casa(tmp_path):
 def sistema(tmp_path, casa):
     h = Herramientas(tmp_path / "datos", sistema=False)
     ejecutor = EjecutorFalso()
-    registrar_sistema(h, carpeta_personal=casa, ejecutar=ejecutor)
+    ejecutor_shell = EjecutorShellFalso()
+    registrar_sistema(h, carpeta_personal=casa, ejecutar=ejecutor, ejecutar_shell=ejecutor_shell)
     h.ejecutor = ejecutor
+    h.ejecutor_shell = ejecutor_shell
     return h
 
 
@@ -166,6 +178,111 @@ def test_cerrar_aplicacion_escapa_comillas(sistema):
 
 
 def test_no_hay_herramientas_de_borrar(tmp_path):
+    """Ninguna herramienta se LLAMA "borrar"/"eliminar"/"mover" — pero
+    ejecutar_comando sí puede hacer eso (es la excepción deliberada: corre
+    cualquier shell, con su propia confirmación en dos pasos). Esta prueba
+    documenta el nombrado, no una garantía de que nada borra nada."""
     nombres = {d["name"] for d in Herramientas(tmp_path).definiciones()}
-    assert {"listar_carpeta", "abrir_aplicacion", "cerrar_aplicacion"} <= nombres
+    assert {"listar_carpeta", "abrir_aplicacion", "cerrar_aplicacion", "ejecutar_comando"} <= nombres
     assert not any(p in n for n in nombres for p in ("borrar", "eliminar", "mover"))
+
+
+# --- escribir_archivo ------------------------------------------------------
+
+def test_escribir_archivo_crea_el_archivo(sistema, casa):
+    salida, error = sistema.ejecutar("escribir_archivo", {
+        "ruta": "Documents/trabajo/main.py", "contenido": "print('hola')",
+    })
+    assert not error
+    assert (casa / "Documents" / "trabajo" / "main.py").read_text() == "print('hola')"
+    assert "main.py" in salida
+
+
+def test_escribir_archivo_sin_carpeta_destino_falla(sistema):
+    salida, error = sistema.ejecutar("escribir_archivo", {
+        "ruta": "Documents/no-existe/main.py", "contenido": "x",
+    })
+    assert error
+
+
+def test_escribir_archivo_no_escapa_la_carpeta_personal(sistema):
+    salida, error = sistema.ejecutar("escribir_archivo", {
+        "ruta": "../fuera.txt", "contenido": "malicioso",
+    })
+    assert error
+
+
+def test_escribir_archivo_reemplaza_uno_existente(sistema, casa):
+    sistema.ejecutar("escribir_archivo", {"ruta": "Documents/trabajo/x.txt", "contenido": "viejo"})
+    sistema.ejecutar("escribir_archivo", {"ruta": "Documents/trabajo/x.txt", "contenido": "nuevo"})
+    assert (casa / "Documents" / "trabajo" / "x.txt").read_text() == "nuevo"
+
+
+# --- abrir_aplicacion con ruta ----------------------------------------------
+
+def test_abrir_aplicacion_sin_ruta_igual_que_antes(sistema):
+    sistema.ejecutar("abrir_aplicacion", {"nombre": "Safari", "ruta": ""})
+    assert sistema.ejecutor.comandos == [["open", "-a", "Safari"]]
+
+
+def test_abrir_aplicacion_con_ruta_la_pasa_al_comando(sistema, casa):
+    sistema.ejecutar("abrir_aplicacion", {"nombre": "Visual Studio Code", "ruta": "Documents/trabajo"})
+    comando = sistema.ejecutor.comandos[-1]
+    assert comando[:3] == ["open", "-a", "Visual Studio Code"]
+    assert comando[3] == str(casa / "Documents" / "trabajo")
+
+
+def test_abrir_aplicacion_con_ruta_fuera_de_la_carpeta_personal_falla(sistema):
+    salida, error = sistema.ejecutar("abrir_aplicacion", {"nombre": "Safari", "ruta": "../fuera.txt"})
+    assert error
+
+
+# --- ejecutar_comando -------------------------------------------------------
+
+def test_ejecutar_comando_sin_confirmar_queda_pendiente_y_no_corre_nada(sistema):
+    salida, error = sistema.ejecutar("ejecutar_comando", {"comando": "echo hola", "confirmado": False})
+    assert not error
+    assert "pendiente" in salida.lower()
+    assert sistema.ejecutor_shell.llamadas == []
+
+
+def test_ejecutar_comando_confirmado_en_el_mismo_turno_no_corre(sistema):
+    sistema.ejecutar("ejecutar_comando", {"comando": "echo hola", "confirmado": False})
+    sistema.ejecutar("ejecutar_comando", {"comando": "echo hola", "confirmado": True})
+    assert sistema.ejecutor_shell.llamadas == []
+
+
+def test_ejecutar_comando_confirmar_no_permite_cambiar_el_comando(sistema):
+    """Mismo hallazgo de seguridad que crear_habilidad: la confirmación se
+    ata al comando exacto, no solo a que "algo" se confirmó — si cambia el
+    comando entre el pedido y la confirmación, cuenta como un pedido nuevo."""
+    sistema.ejecutar("ejecutar_comando", {"comando": "echo inocente", "confirmado": False})
+    sistema.nuevo_turno("sí, dale")
+    salida, error = sistema.ejecutar("ejecutar_comando", {"comando": "rm -rf /", "confirmado": True})
+    assert not error
+    assert "pendiente" in salida.lower()
+    assert sistema.ejecutor_shell.llamadas == []
+
+
+def test_ejecutar_comando_confirmado_en_turno_siguiente_corre_y_devuelve_salida(sistema, casa):
+    sistema.ejecutor_shell.stdout = "listo"
+    sistema.ejecutar("ejecutar_comando", {"comando": "echo hola", "confirmado": False})
+    sistema.nuevo_turno("sí, dale")
+
+    salida, error = sistema.ejecutar("ejecutar_comando", {"comando": "echo hola", "confirmado": True})
+
+    assert not error
+    assert "listo" in salida
+    assert sistema.ejecutor_shell.llamadas == [("echo hola", casa)]
+
+
+def test_ejecutar_comando_requiere_dueño(sistema):
+    sistema.nuevo_turno("corré esto", es_dueño=False)
+    salida, error = sistema.ejecutar("ejecutar_comando", {"comando": "echo hola", "confirmado": False})
+    assert not error
+    assert "no puedo ejecutar" in salida.lower()
+    assert sistema.ejecutor_shell.llamadas == []
+
+
+def test_ejecutar_comando_vacio_falla(sistema):
+    assert sistema.ejecutar("ejecutar_comando", {"comando": "   ", "confirmado": False})[1] is True
