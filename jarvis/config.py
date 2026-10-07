@@ -105,7 +105,7 @@ class Config:
     elevenlabs_voz: str = ""
     elevenlabs_modelo: str = ""
     youtube_api_key: str = ""  # opcional: sin ella, "reproducir música" abre los resultados y elige el usuario
-    memoria_habilitada: bool = False  # memoria permanente (ver jarvis.memoria); requiere ollama + nomic-embed-text
+    memoria_habilitada: bool = True  # memoria permanente (ver jarvis.memoria); requiere ollama + nomic-embed-text
     memoria_modelo_llm: str = "qwen3:8b"  # modelo de Ollama para extracción de entidades (graphiti)
     memoria_modelo_embedding: str = "nomic-embed-text"
     memoria_ventana_gracia_dias: int = 180  # cuánto tardan los hechos invalidados en archivarse en frío
