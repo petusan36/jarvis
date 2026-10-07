@@ -577,6 +577,10 @@ def _atender_menu_local_ventana(servidor) -> str:
 
     resultado = _guardar_eleccion_local(accion["modelo"])
     servidor.actualizar(paso="hecho", mensaje=f"Usando el modelo local {accion['modelo']}.")
+    # El camino de consola (_configurar_local) ya imprime esto; el de
+    # ventana no lo hacía — sin esto, el log nunca decía qué proveedor
+    # eligieron desde el ícono de escritorio, imposible de diagnosticar.
+    print(f"(usando el modelo local {accion['modelo']}; elección guardada en .env)")
     return resultado
 
 
@@ -609,6 +613,7 @@ def _atender_login_ventana(servidor, *, hay_sesion, comando: list[str], motor: s
     login terminó o se agota ``TIMEOUT_LOGIN_VENTANA_SEGUNDOS``."""
     if hay_sesion():
         servidor.actualizar(paso="hecho", mensaje=f"Ya había una sesión de {nombre} activa.")
+        print(f"(ya había sesión de {nombre} activa; usando motor={motor})")
         return _guardar_motor(motor)
 
     servidor.actualizar(
@@ -630,6 +635,7 @@ def _atender_login_ventana(servidor, *, hay_sesion, comando: list[str], motor: s
     while time.monotonic() < limite:
         if hay_sesion():
             servidor.actualizar(paso="hecho", mensaje=f"Sesión de {nombre} activa.")
+            print(f"(login de {nombre} completado; usando motor={motor})")
             return _guardar_motor(motor)
         time.sleep(ESPERA_ENTRE_POLLEOS_SEGUNDOS)
 

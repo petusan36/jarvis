@@ -174,10 +174,14 @@ class Herramientas:
 
         @self.registrar(
             "cerrar_jarvis",
-            "Cierra Jarvis. Úsala cuando el usuario pida salir, cerrar la aplicación, "
-            "terminar, o se despida dejando claro que ya terminó (por ejemplo 'cerrate', "
-            "'listo, salí de la app', 'ya terminamos por hoy'). No hace falta confirmar: "
-            "a diferencia de cerrar otra aplicación, aquí no hay nada que perder.",
+            "Cierra Jarvis. Llamala SIEMPRE que el usuario exprese, de cualquier forma, "
+            "que quiere terminar o salir — no solo con la palabra exacta 'salir'. Ejemplos "
+            "reales que SÍ cuentan: 'cerrate', 'listo, salí de la app', 'ya terminamos por "
+            "hoy', 'gracias Jarvis, por ahora solo salir', 'eso es todo'. Si decís en tu "
+            "respuesta que vas a cerrar o despedirte, tenés que haber llamado esta "
+            "herramienta en la MISMA respuesta — nunca digas que cerrás sin llamarla, "
+            "porque si no la llamás Jarvis sigue abierto esperando otro mensaje. No hace "
+            "falta confirmar: a diferencia de cerrar otra aplicación, aquí no hay nada que perder.",
             {},
         )
         def cerrar_jarvis() -> str:
