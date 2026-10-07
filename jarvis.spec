@@ -58,6 +58,15 @@ PAQUETES_COLLECT_ALL = [
     "faster_whisper",
     "kokoro",
     "misaki",
+    # Cadena de dependencias de misaki para fonemizar español (solo se
+    # importa en runtime, al crear el motor de voz Kokoro — por eso el
+    # bundle abría bien pero se cerraba sola recién al elegir un modelo y
+    # arrancar el motor de voz: ninguno de estos traía sus datos empaquetados).
+    "phonemizer",
+    "csvw",
+    "segments",
+    "language_tags",  # trae language_tags/data/json/index.json
+    "espeakng_loader",  # trae espeakng_loader/espeak-ng-data (voz sonaba distinta sin esto)
     "piper",
     "graphiti_core",
     "ladybug",  # incluye el binario nativo _lbug.cpython-*.so (ex-Kuzu)
