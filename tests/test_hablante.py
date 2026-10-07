@@ -32,3 +32,13 @@ def test_guardar_y_cargar_referencia(tmp_path):
 
 def test_cargar_referencia_sin_enrolar_devuelve_none(tmp_path):
     assert cargar_referencia(tmp_path / "no_existe.npy") is None
+
+
+def test_verificador_roto_falla_cerrado():
+    """Hallazgo de seguridad real: VerificadorRoto se usa cuando SÍ hay una
+    voz enrolada pero el verificador real no cargó — tiene que negar
+    siempre, nunca aceptar, sin importar audio/referencia."""
+    from jarvis.voz.hablante import VerificadorRoto
+
+    roto = VerificadorRoto()
+    assert roto.coincide(audio=object(), referencia=object()) is False

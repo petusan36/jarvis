@@ -245,12 +245,15 @@ def _decir(texto: str, habla, hud: HudNulo, oido=None) -> None:
 def _cargar_reconocimiento_voz(config: Config):
     """Construye el verificador de hablante (ver jarvis.voz.hablante), solo
     si está habilitado Y ya hay una voz enrolada (``jarvis --enrolar-voz``).
-    Degrada con gracia a (None, None) en cualquier otro caso — incluido que
-    falte instalar el soporte, o que el modelo no cargue por lo que sea—:
-    Jarvis sigue funcionando sin reconocimiento de hablante, como siempre."""
+    Sin eso (deshabilitado, o nadie enroló nada todavía), (None, None): no
+    se exige nada, como siempre. Pero si SÍ hay una voz enrolada y el
+    verificador real no carga (falta instalar el soporte, modelo corrupto,
+    etc.), falla cerrado con VerificadorRoto en vez de abierto — el usuario
+    pidió este chequeo, así que una falla no debe desactivarlo en
+    silencio."""
     if not config.reconocimiento_voz_habilitado:
         return None, None
-    from .voz.hablante import VerificadorHablante, cargar_referencia, ruta_referencia
+    from .voz.hablante import VerificadorHablante, VerificadorRoto, cargar_referencia, ruta_referencia
 
     referencia = cargar_referencia(ruta_referencia(config.carpeta_datos))
     if referencia is None:
@@ -258,8 +261,12 @@ def _cargar_reconocimiento_voz(config: Config):
     try:
         verificador = VerificadorHablante(umbral=config.umbral_voz_dueño)
     except RuntimeError as error:
-        print(f"(reconocimiento de voz: {error})", file=sys.stderr)
-        return None, None
+        print(
+            f"(reconocimiento de voz: {error} — las herramientas que requieren tu voz "
+            "se van a negar hasta que esto se arregle)",
+            file=sys.stderr,
+        )
+        return VerificadorRoto(), referencia
     return verificador, referencia
 
 
