@@ -800,6 +800,45 @@ def test_abrir_terminal_con_comando_usa_osascript_con_terminal_app(monkeypatch):
     assert kwargs.get("check") is True
 
 
+def test_redirigir_log_no_hace_nada_fuera_del_bundle(tmp_path, monkeypatch):
+    """Fuera del bundle (desarrollo, tests), sys.frozen no existe -> no debe
+    tocar sys.stdout/stderr ni crear ningun archivo."""
+    import sys as sys_real
+
+    from jarvis.__main__ import _redirigir_log_si_es_bundle_standalone
+
+    stdout_original = sys_real.stdout
+    stderr_original = sys_real.stderr
+    _redirigir_log_si_es_bundle_standalone(tmp_path)
+
+    assert sys_real.stdout is stdout_original
+    assert sys_real.stderr is stderr_original
+    assert not (tmp_path / "jarvis.log").exists()
+
+
+def test_redirigir_log_escribe_al_archivo_dentro_del_bundle(tmp_path, monkeypatch):
+    """Dentro del bundle (sys.frozen = True), stdout/stderr deben quedar
+    apuntando a ~/.jarvis/jarvis.log -- sin esto, un error ahi quedaba
+    invisible (justo el bug reportado: 'Jarvis abre un momento y se cierra',
+    sin nada en ningun lado para diagnosticarlo)."""
+    import sys as sys_real
+
+    from jarvis.__main__ import _redirigir_log_si_es_bundle_standalone
+
+    monkeypatch.setattr(sys_real, "frozen", True, raising=False)
+    stdout_original = sys_real.stdout
+    stderr_original = sys_real.stderr
+    try:
+        _redirigir_log_si_es_bundle_standalone(tmp_path)
+        print("mensaje de prueba")
+        sys_real.stdout.flush()
+        assert "mensaje de prueba" in (tmp_path / "jarvis.log").read_text()
+    finally:
+        sys_real.stdout.close()
+        sys_real.stdout = stdout_original
+        sys_real.stderr = stderr_original
+
+
 def test_instancia_unica_primera_vez_toma_el_lock(tmp_path):
     from jarvis.__main__ import _liberar_instancia, _tomar_instancia_unica
 
