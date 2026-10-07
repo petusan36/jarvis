@@ -346,6 +346,23 @@ def test_suscripcion_responde(herramientas):
     cerebro.cerrar()
 
 
+def test_suscripcion_responder_acepta_es_dueño_igual_que_cerebro_normal(herramientas):
+    """CerebroSuscripcion.responder debe aceptar el mismo segundo argumento
+    que Cerebro.responder (ver jarvis.cerebro): __main__._bucle_conversacion
+    llama cerebro.responder(texto, es_dueño) sin saber cuál de las dos
+    implementaciones está activa. Si las firmas no coinciden, el motor de
+    suscripción crashea en voz, y además deja el gate de requiere_dueño
+    (ver herramientas.py) siempre en True sin que nadie lo note."""
+    pytest.importorskip("claude_agent_sdk")
+    from jarvis.cerebro_suscripcion import CerebroSuscripcion
+
+    cliente = ClienteSDKFalso([_resultado("ok")])
+    cerebro = CerebroSuscripcion(Config(), herramientas, cliente)
+    cerebro.responder("abrí Safari", False)
+    assert herramientas.es_dueño_quien_habla is False
+    cerebro.cerrar()
+
+
 def test_suscripcion_error(herramientas):
     pytest.importorskip("claude_agent_sdk")
     from jarvis.cerebro_suscripcion import CerebroSuscripcion

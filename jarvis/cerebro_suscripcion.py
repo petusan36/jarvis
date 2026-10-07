@@ -36,8 +36,8 @@ class CerebroSuscripcion:
         self._bucle = asyncio.new_event_loop()
         self._cliente = cliente
 
-    def responder(self, texto_usuario: str) -> str:
-        self.herramientas.nuevo_turno(texto_usuario)
+    def responder(self, texto_usuario: str, es_dueño: bool = True) -> str:
+        self.herramientas.nuevo_turno(texto_usuario, es_dueño)
         return self._bucle.run_until_complete(self._responder(texto_usuario))
 
     def olvidar(self) -> None:
