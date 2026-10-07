@@ -117,6 +117,7 @@ class Herramientas:
             self._registrar_memoria(memoria)
         if config is not None:
             self._registrar_identidad(config)
+        self._registrar_habilidades()
 
     def nuevo_turno(self, texto_usuario: str = "", es_dueño: bool = True) -> None:
         """Avisa de que ha llegado un mensaje nuevo del usuario.
@@ -299,6 +300,53 @@ class Herramientas:
                         "Pregúntale al usuario si quiere que lo recuerdes y esperá su "
                         "respuesta antes de llamar de nuevo con confirmado=true.")
             return memoria.recordar(hecho, valor)
+
+    def _registrar_habilidades(self) -> None:
+        from .habilidades import guardar_habilidad, leer_habilidad, listar_habilidades
+
+        carpeta = self.carpeta_datos / "habilidades"
+
+        @self.registrar(
+            "crear_habilidad",
+            "Guarda (o mejora, si ya existe una con el mismo nombre) un procedimiento "
+            "propio para usarlo en esta y futuras conversaciones — al estilo de un "
+            "archivo de skill, NUNCA código que se ejecute. Usala cuando descubras una "
+            "forma útil de hacer algo que probablemente se repita, no para algo de una "
+            "sola vez. Para mejorar una que ya tenés, llamala de nuevo con el mismo "
+            "nombre y el procedimiento actualizado: reemplaza a la anterior entera, no "
+            "la combina. Mostrale al usuario qué guardaste o cambiaste, nunca en silencio.",
+            {
+                "nombre": {"type": "string", "description": "Nombre corto, p. ej. 'resumen-pdf-largo'."},
+                "descripcion": {"type": "string", "description": "Una línea: para qué sirve esta habilidad."},
+                "contenido": {"type": "string", "description": "El procedimiento completo, en tus palabras."},
+            },
+            requiere_dueño=True,
+        )
+        def crear_habilidad(nombre: str, descripcion: str, contenido: str) -> str:
+            ruta = guardar_habilidad(carpeta, nombre, descripcion, contenido)
+            return f"Habilidad «{ruta.stem}» guardada: {descripcion}"
+
+        @self.registrar(
+            "listar_habilidades",
+            "Lista las habilidades propias que ya tenés guardadas (nombre y para qué "
+            "sirve cada una), sin el procedimiento completo.",
+            {},
+        )
+        def listar_habilidades_tool() -> str:
+            habilidades = listar_habilidades(carpeta)
+            if not habilidades:
+                return "No tengo ninguna habilidad propia guardada todavía."
+            return "\n".join(f"- {nombre}: {descripcion}" for nombre, descripcion in habilidades)
+
+        @self.registrar(
+            "leer_habilidad",
+            "Lee el procedimiento completo de una habilidad propia guardada, para "
+            "seguirlo. Usala cuando listar_habilidades (o el resumen que ya tenés a la "
+            "vista) diga que una de tus habilidades aplica a lo que te están pidiendo.",
+            {"nombre": {"type": "string", "description": "Nombre de la habilidad, como aparece en listar_habilidades."}},
+        )
+        def leer_habilidad_tool(nombre: str) -> str:
+            return leer_habilidad(carpeta, nombre)
 
     def _ruta_notas(self) -> Path:
         return self.carpeta_datos / "notas.json"

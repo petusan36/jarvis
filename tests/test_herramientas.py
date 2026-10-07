@@ -165,3 +165,67 @@ def test_guardar_nombre_requiere_dueño(tmp_path, monkeypatch):
     assert not error
     assert "no puedo ejecutar" in salida.lower()
     assert config.nombre_usuario == "señor"  # no cambió
+
+
+# --- habilidades propias (crear_habilidad / listar_habilidades / leer_habilidad) ---
+
+def test_crear_habilidad_la_guarda_y_queda_listable(h):
+    h.nuevo_turno("guardá esto como habilidad")
+    salida, error = h.ejecutar("crear_habilidad", {
+        "nombre": "resumen-pdf-largo",
+        "descripcion": "Cómo resumir un PDF largo en partes",
+        "contenido": "1. Leer el PDF.\n2. Resumir cada sección.\n3. Combinar los resúmenes.",
+    })
+    assert not error
+    assert "resumen-pdf-largo" in salida
+
+    salida_listado, _ = h.ejecutar("listar_habilidades", {})
+    assert "resumen-pdf-largo" in salida_listado
+    assert "Cómo resumir un PDF largo en partes" in salida_listado
+
+
+def test_leer_habilidad_devuelve_el_procedimiento_completo(h):
+    h.nuevo_turno("")
+    h.ejecutar("crear_habilidad", {
+        "nombre": "x", "descripcion": "una habilidad", "contenido": "el procedimiento",
+    })
+    salida, error = h.ejecutar("leer_habilidad", {"nombre": "x"})
+    assert not error
+    assert salida == "el procedimiento"
+
+
+def test_crear_habilidad_de_nuevo_con_el_mismo_nombre_la_mejora(h):
+    h.nuevo_turno("")
+    h.ejecutar("crear_habilidad", {"nombre": "x", "descripcion": "v1", "contenido": "viejo"})
+    h.ejecutar("crear_habilidad", {"nombre": "x", "descripcion": "v2", "contenido": "nuevo"})
+
+    salida, _ = h.ejecutar("leer_habilidad", {"nombre": "x"})
+    assert salida == "nuevo"
+    salida_listado, _ = h.ejecutar("listar_habilidades", {})
+    assert salida_listado.count("x:") == 1  # no quedaron dos entradas
+
+
+def test_crear_habilidad_requiere_dueño(h):
+    h.nuevo_turno("guardá esto", es_dueño=False)
+    salida, error = h.ejecutar("crear_habilidad", {
+        "nombre": "x", "descripcion": "algo", "contenido": "algo",
+    })
+    assert not error
+    assert "no puedo ejecutar" in salida.lower()
+    salida_listado, _ = h.ejecutar("listar_habilidades", {})
+    assert "No tengo ninguna habilidad" in salida_listado
+
+
+def test_listar_habilidades_no_requiere_dueño(h):
+    """Leer/listar es informativo (consultar, no ejecutar una acción): no
+    debería negarse aunque la voz no sea la del dueño."""
+    h.nuevo_turno("", es_dueño=False)
+    assert h.ejecutar("listar_habilidades", {}) == ("No tengo ninguna habilidad propia guardada todavía.", False)
+
+
+def test_crear_habilidad_con_nombre_invalido_falla(h):
+    h.nuevo_turno("")
+    salida, error = h.ejecutar("crear_habilidad", {
+        "nombre": "   ", "descripcion": "algo", "contenido": "algo",
+    })
+    assert error

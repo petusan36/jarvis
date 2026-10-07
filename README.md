@@ -294,6 +294,35 @@ También entra solo en este modo tras un rato sin que le pidas nada
 desactiva el reposo automático, aunque el pedido explícito con la voz sigue
 funcionando).
 
+## Cómo mejora Jarvis con el tiempo
+
+Dos capas distintas, que no se mezclan:
+
+- **Memoria** (`jarvis/memoria/`, activada por defecto desde esta versión):
+  hechos y preferencias sobre vos — "le gusta el rock", "vive en Córdoba" —
+  guardados con la herramienta "recordar" (pide confirmación antes de
+  guardar nada). Es un grafo temporal (Graphiti + LadybugDB): un hecho que
+  actualiza a otro más viejo lo invalida en vez de dejarlos contradictorios,
+  y lo invalidado se archiva en frío tras un tiempo (`JARVIS_MEMORIA_VENTANA_GRACIA_DIAS`)
+  en vez de crecer sin límite. Se inyecta en cada conversación como DATO,
+  nunca como instrucción — necesita Ollama + `nomic-embed-text`, que ya
+  quedan instalados con el comando único de instalación. Para apagarla:
+  `JARVIS_MEMORIA=0`.
+- **Habilidades** (`jarvis/habilidades.py`): procedimientos que Jarvis
+  descubre y se escribe a sí mismo — "cómo resumir un PDF largo en partes",
+  por ejemplo — con la herramienta "crear_habilidad". Es texto plano, al
+  estilo de un archivo de skill, **nunca código que se ejecute**: Jarvis no
+  genera ni corre programas por su cuenta, y no instala nada por sí mismo.
+  Llamar a "crear_habilidad" de nuevo con el mismo nombre mejora esa
+  habilidad (la reemplaza entera, no la combina). Se cargan en dos niveles:
+  el nombre y para qué sirve cada una están siempre visibles; el
+  procedimiento completo se lee bajo demanda con "leer_habilidad", para no
+  inflar cada conversación con contenido que tal vez no haga falta.
+
+Ambas exigen que sea tu voz la que lo pida (reconocimiento de voz del
+usuario, si lo enrolaste) — nadie más puede hacer que Jarvis aprenda algo
+sobre vos o cambie cómo hace las cosas.
+
 ## Animación (HUD)
 
 En el modo completo (por defecto) ya se abre sola: un arco reactor en el
@@ -488,6 +517,7 @@ jarvis/
 ├── proveedores/     puerto ProveedorIA y adaptadores (Anthropic, Ollama, Codex)
 ├── memoria/         puerto PuertoMemoria + adaptador Graphiti/LadybugDB/Ollama + archivo frío
 ├── herramientas.py  herramientas que el modelo puede usar
+├── habilidades.py   habilidades propias que Jarvis se escribe a sí mismo (texto, no código)
 ├── autorizacion.py  confirmación en dos pasos para herramientas sensibles (ver roadmap punto 3)
 ├── sistema.py       herramientas de carpetas, aplicaciones y PDFs (macOS)
 ├── musica.py        buscar y reproducir música en YouTube
