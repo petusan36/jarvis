@@ -11,6 +11,7 @@ import json
 import math
 import operator
 import os
+import re
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -21,6 +22,12 @@ from .autorizacion import Autorizacion
 if TYPE_CHECKING:
     from .config import Config
     from .memoria.puerto import PuertoMemoria
+
+
+# Letras, dígitos, espacios y la puntuación habitual en nombres/apodos. Ver
+# guardar_nombre: nada de saltos de línea, comillas ni signos que puedan
+# escapar el formato CLAVE=valor de .env o leerse como una instrucción.
+_NOMBRE_VALIDO = re.compile(r"[\w .'-]+")
 
 
 @dataclass
@@ -235,8 +242,21 @@ class Herramientas:
         )
         def guardar_nombre(nombre: str) -> str:
             nombre = nombre.strip()
-            if not nombre:
-                raise ValueError("decime qué nombre guardar")
+            # Validación estricta, no solo "no vacío": este valor se escribe
+            # tal cual en .env (una línea CLAVE=valor) y se repite en el
+            # system prompt de TODAS las conversaciones futuras (ver
+            # cerebro.INSTRUCCIONES). Sin esto, un salto de línea en nombre
+            # inyectaría líneas nuevas en .env (podría pisar cualquier otra
+            # variable, incluida ANTHROPIC_API_KEY), y un texto largo tipo
+            # instrucción quedaría persistido como inyección de prompt
+            # permanente — el usuario nunca escribe esto directo, lo manda
+            # el modelo, que podría haber leído algo malicioso (p. ej. una
+            # página web) que le diga que llame a esta herramienta.
+            if not 1 <= len(nombre) <= 40 or not _NOMBRE_VALIDO.fullmatch(nombre):
+                raise ValueError(
+                    "ese nombre no es válido: máximo 40 caracteres, sin saltos de línea "
+                    "ni símbolos raros — solo letras, espacios y guiones."
+                )
             from .config import guardar_en_env
 
             guardar_en_env("JARVIS_NOMBRE_USUARIO", nombre)

@@ -50,7 +50,17 @@ def guardar_en_env(clave: str, valor: str, ruta: Path | None = None) -> None:
     en el directorio de trabajo: se resuelve en el cuerpo de la función (no
     como valor por defecto del parámetro) para que un test pueda
     monkeypatchear ``_RUTA_ENV_POR_DEFECTO`` y que surta efecto — un default
-    de parámetro queda fijo en el momento en que se define la función."""
+    de parámetro queda fijo en el momento en que se define la función.
+
+    Rechaza un salto de línea en ``clave`` o ``valor``: el formato de .env es
+    una línea CLAVE=valor por entrada, así que un salto de línea en el valor
+    inyectaría líneas nuevas — pisando cualquier otra variable, incluida
+    ANTHROPIC_API_KEY — en vez de quedar contenido en esta. Defensa en
+    profundidad: quien llama (p. ej. la herramienta "guardar_nombre", con un
+    valor que en última instancia decide el modelo) debería validar esto
+    también, pero esta función no confía en que lo haya hecho."""
+    if "\n" in clave or "\r" in clave or "\n" in valor or "\r" in valor:
+        raise ValueError("clave o valor con salto de línea: no se puede guardar en .env")
     if ruta is None:
         ruta = _RUTA_ENV_POR_DEFECTO
     ruta.parent.mkdir(parents=True, exist_ok=True)
