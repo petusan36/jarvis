@@ -36,6 +36,20 @@ class NoInstalado(RuntimeError):
     """Falta el soporte de reconocimiento de hablante."""
 
 
+class VerificadorRoto:
+    """Se usa cuando SÍ hay una voz enrolada pero el verificador real no
+    pudo cargar (dependencia rota, modelo corrupto, sin espacio en disco,
+    etc.) — a diferencia de no pasar ningún verificador (nadie enroló nada
+    todavía, no se exige nada), acá el usuario SÍ optó por el
+    reconocimiento de voz. Fallar cerrado, no abierto: mientras el
+    verificador real no cargue, cualquier herramienta con
+    ``requiere_dueño=True`` se niega para cualquier voz, en vez de
+    ejecutarse para todas como si nunca se hubiera enrolado nada."""
+
+    def coincide(self, audio: np.ndarray, referencia: np.ndarray) -> bool:
+        return False
+
+
 class VerificadorHablante:
     """Compara una grabación contra la voz de referencia del dueño."""
 
