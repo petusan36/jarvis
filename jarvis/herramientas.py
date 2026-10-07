@@ -57,6 +57,7 @@ class Herramientas:
         self,
         carpeta_datos: Path,
         sistema: bool = True,
+        web: bool = True,
         youtube_api_key: str = "",
         memoria: "PuertoMemoria | None" = None,
     ):
@@ -95,8 +96,9 @@ class Herramientas:
             registrar_sistema(self)
         from .musica import registrar_musica
         registrar_musica(self, youtube_api_key)
-        from .web import registrar_web
-        registrar_web(self)
+        if web:
+            from .web import registrar_web
+            registrar_web(self)
         if memoria is not None:
             self._registrar_memoria(memoria)
 

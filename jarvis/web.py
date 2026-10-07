@@ -7,13 +7,15 @@ from __future__ import annotations
 
 import urllib.parse
 import webbrowser
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable
 
 if TYPE_CHECKING:
     from .herramientas import Herramientas
 
+AbrirNavegador = Callable[[str], None]
 
-def registrar_web(h: "Herramientas") -> None:
+
+def registrar_web(h: "Herramientas", abrir_navegador: AbrirNavegador = webbrowser.open) -> None:
     @h.registrar(
         "abrir_pagina_web",
         "Abre una página web en el navegador: una URL si el usuario la da "
@@ -28,7 +30,7 @@ def registrar_web(h: "Herramientas") -> None:
         if not texto:
             raise ValueError("dime qué página abrir o qué buscar")
         url = _a_url(texto)
-        webbrowser.open(url)
+        abrir_navegador(url)
         return f"Abierto: {url}"
 
 
