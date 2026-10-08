@@ -12,6 +12,7 @@ conoce sus propios callbacks (``al_aceptar``, etc.) — este archivo es el
 import toga
 
 from .pantallas.hardware import PantallaHardware
+from .pantallas.modelo import PantallaModelo
 from .pantallas.ollama import PantallaOllama
 from .pantallas.terminos import PantallaTerminos
 
@@ -44,8 +45,15 @@ class InstaladordeJarvis(toga.App):
         self.main_window.content = pantalla.contenido
 
     def _hardware_escaneado(self, info_hardware) -> None:
-        # Próximo paso (selección de modelo) se agrega en el siguiente incremento.
         self._info_hardware = info_hardware
+        self._mostrar_modelo()
+
+    def _mostrar_modelo(self) -> None:
+        pantalla = PantallaModelo(self._info_hardware, al_continuar=self._modelo_listo)
+        self.main_window.content = pantalla.contenido
+
+    def _modelo_listo(self) -> None:
+        # Próximo paso (resto de la instalación) se agrega en el siguiente incremento.
         self.main_window.content = toga.Box()
 
     def _terminos_rechazados(self) -> None:

@@ -43,6 +43,7 @@ def test_instalar_ollama_en_windows_levanta_error_sin_tocar_nada(monkeypatch):
 def test_instalar_ollama_corre_el_script_oficial_y_reporta_progreso(monkeypatch):
     monkeypatch.setattr(ollama.sys, "platform", "darwin")
     proceso_falso = MagicMock()
+    proceso_falso.__enter__.return_value = proceso_falso
     proceso_falso.stdout = iter(["Descargando...\n", "Instalando...\n"])
     proceso_falso.wait.return_value = 0
     llamadas = []
@@ -58,6 +59,7 @@ def test_instalar_ollama_corre_el_script_oficial_y_reporta_progreso(monkeypatch)
 def test_instalar_ollama_si_el_script_falla_levanta_error_con_el_codigo(monkeypatch):
     monkeypatch.setattr(ollama.sys, "platform", "linux")
     proceso_falso = MagicMock()
+    proceso_falso.__enter__.return_value = proceso_falso
     proceso_falso.stdout = iter([])
     proceso_falso.wait.return_value = 1
     with patch.object(ollama.subprocess, "Popen", return_value=proceso_falso):
