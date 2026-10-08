@@ -4,21 +4,23 @@ name: Publicar release de Jarvis
 # nativos), pero en vez de subir un artifact efímero de CI (requiere login
 # de GitHub, pensado para que un developer lo baje a mano) publica un
 # GitHub Release real con el bundle de cada SO adjunto — eso es lo que
-# instalador/src/instalador/version.py necesita para poder descargar el
+# instalador/src/instalador/instalacion.py necesita para poder descargar el
 # bundle real sin que el usuario tenga el repo clonado (ver roadmap punto
 # 5, PR del instalador gráfico).
 #
 # Se dispara con un tag "v*" (ej. v0.1.0) — nunca automático en cada push,
 # a diferencia de build-app.yml: cortar un release es una decisión
 # explícita, no algo que deba pasar solo.
+#
+# permissions por defecto es "contents: read" (heredado del repo/org) para
+# TODO el workflow; solo el job "publicar" eleva a "write" (lo mínimo que
+# softprops/action-gh-release necesita para crear el Release) — el job
+# "build" nunca necesita escribir nada, así que no lo tiene.
 
 on:
   push:
     tags:
       - "v*"
-
-permissions:
-  contents: write  # softprops/action-gh-release necesita esto para crear el Release
 
 jobs:
   build:
@@ -91,6 +93,8 @@ jobs:
   publicar:
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      contents: write  # softprops/action-gh-release necesita esto para crear el Release
     steps:
       - uses: actions/download-artifact@v4
         with:
