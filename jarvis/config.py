@@ -117,10 +117,11 @@ class Config:
     memoria_modelo_llm: str = "qwen3:4b"
     memoria_modelo_embedding: str = "nomic-embed-text"
     memoria_ventana_gracia_dias: int = 180  # cuánto tardan los hechos invalidados en archivarse en frío
-    # Reconocimiento de hablante (ver jarvis.voz.hablante): mientras no haya
-    # voz enrolada (--enrolar-voz), no exige nada, igual que siempre.
+    # Reconocimiento de hablante (ver jarvis.voz.hablante): se enrola solo
+    # en el primer arranque en modo voz si está habilitado y todavía no hay
+    # referencia (ver jarvis.__main__._cargar_reconocimiento_voz).
     reconocimiento_voz_habilitado: bool = True
-    umbral_voz_dueño: float = 0.75
+    umbral_voz_dueño: float = 0.40  # ver UMBRAL_POR_DEFECTO en jarvis.voz.hablante
     # Modo de escucha pasiva (ver jarvis.voz.oido.Oido.dormir): tras este
     # tiempo sin una frase real dirigida a Jarvis, entra solo en reposo y
     # solo vuelve a atender si lo nombrás. 0 desactiva el reposo automático

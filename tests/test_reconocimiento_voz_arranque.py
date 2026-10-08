@@ -1,6 +1,6 @@
-"""Pruebas de jarvis.__main__._cargar_reconocimiento_voz: qué pasa cuando
-hay una voz enrolada pero el verificador real no carga (sin tocar
-SpeechBrain real)."""
+"""Pruebas de jarvis.__main__._cargar_reconocimiento_voz: qué pasa cuando no
+hay voz enrolada todavía (se enrola sola) y cuando hay una voz enrolada pero
+el verificador real no carga (sin tocar SpeechBrain ni el micrófono real)."""
 
 import numpy as np
 import pytest
@@ -10,8 +10,42 @@ from jarvis.config import Config
 from jarvis.voz.hablante import VerificadorRoto, guardar_referencia, ruta_referencia
 
 
-def test_sin_voz_enrolada_no_exige_nada(tmp_path):
+def test_sin_voz_enrolada_la_enrola_automaticamente(tmp_path, monkeypatch):
+    """El reconocimiento de hablante está habilitado por defecto: si nadie
+    enroló su voz todavía, debe quedar activo desde el primer arranque en
+    modo voz, no requerir que el usuario descubra y corra
+    `jarvis --enrolar-voz` aparte."""
     config = Config(carpeta_datos=tmp_path)
+
+    def _enrolar_falso(cfg, anunciar=print):
+        anunciar("probando")
+        guardar_referencia(ruta_referencia(cfg.carpeta_datos), np.array([0.1, 0.2], dtype=np.float32))
+
+    monkeypatch.setattr("jarvis.voz.hablante.enrolar_voz_automatico", _enrolar_falso)
+
+    class _VerificadorFalso:
+        def __init__(self, umbral):
+            self.umbral = umbral
+
+    monkeypatch.setattr("jarvis.voz.hablante.VerificadorHablante", _VerificadorFalso)
+
+    verificador, referencia = _cargar_reconocimiento_voz(config)
+
+    assert isinstance(verificador, _VerificadorFalso)
+    assert referencia is not None
+
+
+def test_sin_voz_enrolada_y_falla_el_enrolamiento_automatico_no_exige_nada(tmp_path, monkeypatch):
+    """Si el enrolamiento automático falla (sin soporte instalado, sin
+    micrófono disponible), Jarvis no debe trabar el arranque: sigue sin
+    exigir identidad hasta que el usuario pueda enrolar su voz."""
+    config = Config(carpeta_datos=tmp_path)
+
+    def _falla(cfg, anunciar=print):
+        raise OSError("no hay micrófono disponible")
+
+    monkeypatch.setattr("jarvis.voz.hablante.enrolar_voz_automatico", _falla)
+
     assert _cargar_reconocimiento_voz(config) == (None, None)
 
 

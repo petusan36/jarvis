@@ -86,6 +86,19 @@ def ejecutar_con_ventana_flotante(url: str, trabajo: Callable[[], None]) -> None
 
     app = AppKit.NSApplication.sharedApplication()
     app.setActivationPolicy_(AppKit.NSApplicationActivationPolicyAccessory)  # sin ícono en el Dock
+    # Sin esto, AppKit interpreta "ventana oculta" (ver ocultar_ventana, modo
+    # de escucha pasiva) como "la app ya no tiene nada que mostrar" y, tras
+    # un rato sin ventanas visibles, macOS la mata sola vía Terminación
+    # Automática — sin señal, sin traceback, sin rastro en ningún log de
+    # Jarvis (confirmado con el log unificado del sistema: AppKit marca
+    # _kLSApplicationWouldBeTerminatedByTALKey=1 y el proceso desaparece
+    # minutos después). El modo dormir existe justamente para seguir
+    # corriendo en segundo plano con la ventana oculta, así que la app debe
+    # quedar exenta de esto desde que arranca, no solo mientras la ventana
+    # está visible.
+    AppKit.NSProcessInfo.processInfo().disableAutomaticTermination_(
+        "Jarvis sigue corriendo en modo de escucha pasiva"
+    )
     _ventana_flotante_activa = _crear_ventana(url)
     try:
         _correr_trabajo_y_terminar(app, trabajo)

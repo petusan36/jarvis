@@ -146,15 +146,10 @@ def _bucle_conversacion(args, config: Config, cerebro, hud: HudNulo, oido=None, 
     del HUD; en cualquier otro caso quedan en no-op."""
     modo_voz = not args.texto
     if modo_voz:
-        if oido is None:
-            from .voz.oido import Oido
-            verificador, referencia_voz = _cargar_reconocimiento_voz(config)
-            oido = Oido(config.modelo_whisper, config.idioma, hud, pulsar=args.pulsar,
-                        palabra_activacion=config.palabra_activacion,
-                        sensibilidad=config.sensibilidad_voz,
-                        verificador=verificador, referencia_voz=referencia_voz,
-                        segundos_reposo_inactividad=config.segundos_reposo_inactividad,
-                        al_dormir=al_dormir, al_despertar=al_despertar)
+        # habla se crea antes que oido para poder anunciar por voz (además de
+        # texto) si hace falta enrolar la voz de referencia automáticamente
+        # (ver _cargar_reconocimiento_voz) — no hay orden distinto posible
+        # cuando Jarvis corre sin terminal real (app de escritorio).
         if not args.silencio and habla is None:
             from .voz.habla import crear_habla
             try:
@@ -163,6 +158,15 @@ def _bucle_conversacion(args, config: Config, cerebro, hud: HudNulo, oido=None, 
                 print(error, file=sys.stderr)
                 return 1
             print(f"(voz: {habla.nombre})")
+        if oido is None:
+            from .voz.oido import Oido
+            verificador, referencia_voz = _cargar_reconocimiento_voz(config, habla)
+            oido = Oido(config.modelo_whisper, config.idioma, hud, pulsar=args.pulsar,
+                        palabra_activacion=config.palabra_activacion,
+                        sensibilidad=config.sensibilidad_voz,
+                        verificador=verificador, referencia_voz=referencia_voz,
+                        segundos_reposo_inactividad=config.segundos_reposo_inactividad,
+                        al_dormir=al_dormir, al_despertar=al_despertar)
 
     saludo = (f"A su servicio, {config.nombre_usuario}. "
               f"{'Diga' if oido else 'Escriba'} 'salir' para terminar.")
@@ -242,22 +246,45 @@ def _decir(texto: str, habla, hud: HudNulo, oido=None) -> None:
     hud.estado("reposo")
 
 
-def _cargar_reconocimiento_voz(config: Config):
-    """Construye el verificador de hablante (ver jarvis.voz.hablante), solo
-    si está habilitado Y ya hay una voz enrolada (``jarvis --enrolar-voz``).
-    Sin eso (deshabilitado, o nadie enroló nada todavía), (None, None): no
-    se exige nada, como siempre. Pero si SÍ hay una voz enrolada y el
-    verificador real no carga (falta instalar el soporte, modelo corrupto,
-    etc.), falla cerrado con VerificadorRoto en vez de abierto — el usuario
-    pidió este chequeo, así que una falla no debe desactivarlo en
-    silencio."""
+def _cargar_reconocimiento_voz(config: Config, habla=None):
+    """Construye el verificador de hablante (ver jarvis.voz.hablante). Si
+    está habilitado (por defecto) pero todavía no hay ninguna voz enrolada,
+    la enrola automáticamente acá mismo — el reconocimiento de hablante debe
+    quedar activo de entrada, no depender de que el usuario descubra y corra
+    ``jarvis --enrolar-voz`` por su cuenta. Si está deshabilitado a propósito
+    (``JARVIS_VOZ_RECONOCIMIENTO=0``), (None, None): no se exige nada. Si SÍ
+    hay (o se acaba de crear) una voz enrolada y el verificador real no
+    carga (falta instalar el soporte, modelo corrupto, etc.), falla cerrado
+    con VerificadorRoto en vez de abierto — el usuario optó por este chequeo,
+    así que una falla no debe desactivarlo en silencio."""
     if not config.reconocimiento_voz_habilitado:
         return None, None
-    from .voz.hablante import VerificadorHablante, VerificadorRoto, cargar_referencia, ruta_referencia
+    from .voz.hablante import (
+        NoInstalado,
+        VerificadorHablante,
+        VerificadorRoto,
+        cargar_referencia,
+        enrolar_voz_automatico,
+        ruta_referencia,
+    )
 
-    referencia = cargar_referencia(ruta_referencia(config.carpeta_datos))
+    ruta = ruta_referencia(config.carpeta_datos)
+    referencia = cargar_referencia(ruta)
     if referencia is None:
-        return None, None
+        def anunciar(texto: str) -> None:
+            print(texto)
+            if habla:
+                habla.decir(texto)
+        try:
+            enrolar_voz_automatico(config, anunciar=anunciar)
+        except (NoInstalado, OSError) as error:
+            print(
+                f"(no se pudo enrolar tu voz automáticamente: {error} — Jarvis sigue sin "
+                "distinguir quién habla hasta que esto se resuelva)",
+                file=sys.stderr,
+            )
+            return None, None
+        referencia = cargar_referencia(ruta)
     try:
         verificador = VerificadorHablante(umbral=config.umbral_voz_dueño)
     except RuntimeError as error:
