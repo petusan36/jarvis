@@ -60,6 +60,17 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y espeak-ng portaudio19-dev libsndfile1
 
+      # Sin esto, pip instala la wheel de torch/torchaudio con CUDA completo
+      # en Linux (varios GB de runtime de NVIDIA) — Jarvis no usa GPU local
+      # para nada (Whisper/Kokoro corren bien en CPU; Ollama, si hay GPU, la
+      # usa por su cuenta vía su propio runtime, no a través de este
+      # torch). Confirmado en vivo: sin este fix, el bundle de Linux pesó
+      # 3,24GB comprimido, por encima del límite de 2GB de GitHub Releases
+      # por asset (macOS/Windows, sin problema de CUDA, pesaron ~370-430MB).
+      - name: Instalar torch/torchaudio CPU-only (Linux)
+        if: matrix.nombre == 'linux'
+        run: pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
+
       - name: Instalar jarvis con el grupo "build"
         run: pip install -e ".[build]"
 
