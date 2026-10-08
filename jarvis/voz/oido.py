@@ -81,6 +81,56 @@ class DetectorVoz:
         return None
 
 
+def grabar_frase_con_vad(sensibilidad: float = 3.0, hud: HudNulo | None = None):
+    """Graba una sola frase por el micrófono con el mismo detector de voz
+    (VAD) que usa ``Oido`` en uso normal: arranca cuando detecta voz, corta
+    tras un silencio. Separado de ``Oido._grabar_continuo`` (que ahora la
+    llama) para poder usarse también al enrolar la voz de referencia (ver
+    ``jarvis.voz.hablante``) sin tener que cargar Whisper.
+
+    Importa: la huella de voz de referencia tiene que grabarse en las
+    MISMAS condiciones que la verificación en uso real (frases cortas
+    recortadas por VAD), no como una grabación continua de varios segundos
+    aparte — confirmado en vivo que esa discrepancia por sí sola bajaba la
+    similitud real a 0,22-0,39 contra el umbral, independientemente de qué
+    tan bajo se pusiera el umbral."""
+    import numpy as np
+    import sounddevice as sd
+
+    hud = hud or HudNulo()
+    bloques: queue.Queue = queue.Queue()
+
+    def al_recibir(datos, _frames, _tiempo, _estado):
+        bloques.put(datos[:, 0].copy())
+
+    detector = DetectorVoz(sensibilidad=sensibilidad)
+    previo = collections.deque(maxlen=10)  # 300 ms antes de detectar voz, para no comerse el inicio
+    frase: list = []
+    hud.estado("reposo")
+    with sd.InputStream(samplerate=FRECUENCIA, channels=1, dtype="float32",
+                        blocksize=BLOQUE, callback=al_recibir):
+        # Al abrir el micrófono justo después de que Jarvis hable puede quedar eco: se descarta.
+        fin_eco = time.monotonic() + 0.25
+        while True:
+            bloque = bloques.get()
+            if time.monotonic() < fin_eco:
+                continue
+            rms = float(np.sqrt(np.mean(bloque ** 2)))
+            evento = detector.procesar(rms)
+            if detector.hablando or evento == "fin":
+                frase.append(bloque)
+                hud.nivel(rms * 8)  # el habla normal ronda 0,02-0,15
+                if evento == "inicio":
+                    frase[:0] = list(previo)
+                    hud.estado("escuchando", "")
+                elif evento == "fin":
+                    break
+            else:
+                previo.append(bloque)
+    hud.nivel(0)
+    return np.concatenate(frase)
+
+
 class Oido:
     def __init__(self, modelo: str = "small", idioma: str = "es", hud: HudNulo | None = None,
                  pulsar: bool = False, palabra_activacion: str = "", sensibilidad: float = 3.0,
@@ -251,46 +301,12 @@ class Oido:
 
     def _grabar_continuo(self):
         """Graba la siguiente frase: empieza cuando oye voz y corta tras un silencio."""
-        import numpy as np
-        import sounddevice as sd
-
         if not self._avisado:
             aviso = (f"di «{self.palabra_activacion.split(',')[0].strip()}» y lo que necesites"
                      if self.palabra_activacion else "habla cuando quieras")
             print(f"🎙  Te escucho: {aviso}. Ctrl+C para salir.")
             self._avisado = True
-
-        bloques: queue.Queue = queue.Queue()
-
-        def al_recibir(datos, _frames, _tiempo, _estado):
-            bloques.put(datos[:, 0].copy())
-
-        detector = DetectorVoz(sensibilidad=self.sensibilidad)
-        previo = collections.deque(maxlen=10)  # 300 ms antes de detectar voz, para no comerse el inicio
-        frase: list = []
-        self.hud.estado("reposo")
-        with sd.InputStream(samplerate=FRECUENCIA, channels=1, dtype="float32",
-                            blocksize=BLOQUE, callback=al_recibir):
-            # Al abrir el micrófono justo después de que Jarvis hable puede quedar eco: se descarta.
-            fin_eco = time.monotonic() + 0.25
-            while True:
-                bloque = bloques.get()
-                if time.monotonic() < fin_eco:
-                    continue
-                rms = float(np.sqrt(np.mean(bloque ** 2)))
-                evento = detector.procesar(rms)
-                if detector.hablando or evento == "fin":
-                    frase.append(bloque)
-                    self.hud.nivel(rms * 8)  # el habla normal ronda 0,02-0,15
-                    if evento == "inicio":
-                        frase[:0] = list(previo)
-                        self.hud.estado("escuchando", "")
-                    elif evento == "fin":
-                        break
-                else:
-                    previo.append(bloque)
-        self.hud.nivel(0)
-        return np.concatenate(frase)
+        return grabar_frase_con_vad(sensibilidad=self.sensibilidad, hud=self.hud)
 
     def _grabar_pulsando(self):
         """Modo clásico: Enter para empezar y Enter para terminar."""
