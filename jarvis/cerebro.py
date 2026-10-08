@@ -150,7 +150,18 @@ def _contexto_memoria(memoria: Any, texto_usuario: str) -> str:
     cada conversación futura en vez de una sola vez."""
     if memoria is None:
         return ""
-    hechos = memoria.contexto_relevante(texto_usuario)
+    try:
+        hechos = memoria.contexto_relevante(texto_usuario)
+    except Exception as error:
+        # Bug real encontrado en vivo: memoria.contexto_relevante() llama a
+        # Ollama (embeddings) vía graphiti_core/openai — si Ollama no
+        # responde (no está corriendo, red caída), la excepción no
+        # manejada tiraba abajo el hilo entero de la conversación, no solo
+        # este turno. La memoria es una mejora de mejor esfuerzo, no un
+        # requisito para que Jarvis funcione: sin contexto recordado, sigue
+        # respondiendo con normalidad en vez de crashear.
+        print(f"(memoria: no se pudo consultar el contexto relevante — {error})")
+        return ""
     if not hechos:
         return ""
     lista = "\n".join(f"- {hecho}" for hecho in hechos)
