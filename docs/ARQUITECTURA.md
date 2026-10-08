@@ -10,7 +10,7 @@ corrigió.
 ```mermaid
 flowchart TB
     subgraph Entrada["Entrada"]
-        CLI["__main__.py\nmain() / _ejecutar()\nargparse, --enrolar-voz,\n--instalar-app"]
+        CLI["__main__.py\nmain() / _ejecutar()\nargparse, --enrolar-voz\n(re-enrolar a mano),\n--instalar-app"]
         Icono["escritorio.py\n--instalar-app: copia el bundle\nPyInstaller de dist/"]
     end
 
@@ -164,6 +164,18 @@ flowchart TB
     `requiere_dueño=True` se niega a ejecutarse — sin importar qué diga el
     `confirmado` que mande el modelo. Falla CERRADO: si el verificador
     crashea, se trata como "no es el dueño", nunca como "sí lo es".
+  - **Enrolamiento automático** (`_cargar_reconocimiento_voz` en
+    `__main__.py`): activo por defecto, no opt-in. Si el reconocimiento
+    está habilitado (`reconocimiento_voz_habilitado`, default `True`) y
+    todavía no hay `voz_dueño.npy`, el primer arranque en modo voz la graba
+    solo (anuncia por texto y TTS, espera, graba 6s) — `--enrolar-voz`
+    sigue existiendo solo para re-enrolar a mano. `UMBRAL_POR_DEFECTO`
+    (`hablante.py`) se bajó dos veces con datos reales: 0.75→0.55 (0.75
+    rechazaba al dueño el 100% de las veces), luego 0.55→0.40 (turnos reales
+    del mismo dueño enrolado midieron 0.51/0.51/0.41, todos por debajo de
+    0.55 también). `Oido._coincide_con_dueño` loguea la similitud coseno
+    real en cada rechazo (no solo sí/no) para seguir ajustando
+    `JARVIS_VOZ_UMBRAL` con datos en vez de a ciegas.
 - **I/O inyectable, no monkeypatch de módulo**: `sistema.py` (`Ejecutor`),
   `musica.py` (`AbrirNavegador`/`BuscarVideo`), `web.py` (`AbrirNavegador`),
   y `_bucle_conversacion` (`oido`/`habla`) — todos siguen el mismo patrón:
@@ -199,6 +211,15 @@ flowchart TB
   `ventana_macos.ocultar_ventana`/`mostrar_ventana` como los ganchos
   `al_dormir`/`al_despertar` de `Oido` — en cualquier otro camino (modo
   texto, Linux/Windows) quedan en no-op.
+  - **Trampa real encontrada**: ocultar la ventana nativa (`orderOut:`) deja
+    la app sin ventanas visibles, y AppKit interpreta eso como "nada que
+    hacer" — pasado un rato, la Terminación Automática de macOS mata el
+    proceso entero, sin señal ni traceback (invisible incluso con el log
+    redirigido al bundle). `ejecutar_con_ventana_flotante` ahora llama a
+    `NSProcessInfo.processInfo().disableAutomaticTermination_(...)` al
+    arrancar, antes de poder ocultar nada — si falta, cualquier sesión que
+    entre en reposo (por `dormir_jarvis` o por los 300s de
+    `segundos_reposo_inactividad`) termina muriendo sola.
 - **App de escritorio**: `--instalar-app` construye (o copia) un bundle
   PyInstaller `--onedir` independiente del repo y del `.venv` de
   desarrollo. Los modelos de voz (Whisper, Kokoro, SpeechBrain) NO van

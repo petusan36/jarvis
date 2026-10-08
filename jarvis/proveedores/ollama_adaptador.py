@@ -28,7 +28,9 @@ from .puerto import (
 )
 
 URL_POR_DEFECTO = "http://localhost:11434"
-_TIMEOUT_SEGUNDOS = 120  # los modelos locales pueden tardar más que una API en la nube
+_TIMEOUT_SEGUNDOS = 240  # medido en vivo: una sola respuesta con el prompt completo
+# (INSTRUCCIONES + ~17 herramientas) tardó 104,9s con qwen3:4b en un M2 Pro — 120s
+# dejaba casi sin margen para una tanda con una herramienta de por medio.
 
 
 class AdaptadorOllama(ProveedorIA):
@@ -102,7 +104,13 @@ def _peticion_json(url: str, cuerpo: dict[str, Any]) -> dict[str, Any]:
     try:
         with urllib.request.urlopen(peticion, timeout=_TIMEOUT_SEGUNDOS) as respuesta:
             return json.loads(respuesta.read())
-    except (urllib.error.URLError, TimeoutError) as error:
+    except TimeoutError as error:
+        # Mensaje distinto de URLError a propósito: "no conecta" (Ollama no
+        # está corriendo) y "tardó demasiado" (está corriendo, pero el
+        # modelo no respondió a tiempo) tienen causas y arreglos distintos
+        # — confundirlos hace perder tiempo diagnosticando lo que no es.
+        raise OSError(f"Ollama no respondió en {_TIMEOUT_SEGUNDOS}s (¿modelo muy grande para el equipo?)") from error
+    except urllib.error.URLError as error:
         raise OSError(f"no se pudo conectar con Ollama en {url}") from error
     except json.JSONDecodeError as error:
         raise OSError("Ollama respondió algo que no es JSON válido") from error

@@ -1,4 +1,5 @@
-"""HUD estilo Jarvis: anillos animados que reaccionan al estado.
+"""HUD estilo Jarvis: nebulosa animada (anillo de polvo fijo, estrellas que
+cambian de color) que reacciona al estado.
 
 Solo usa la biblioteca estándar: un pequeño servidor HTTP local sirve la página
 (hud.html, un canvas) y le envía los cambios de estado por Server-Sent Events.

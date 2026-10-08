@@ -187,7 +187,7 @@ if sys.platform == "darwin":
     app = BUNDLE(
         coll,
         name="Jarvis.app",
-        icon=None,
+        icon="assets/jarvis.icns",
         bundle_identifier="com.jarvis.asistente",
         info_plist={
             "CFBundleName": "Jarvis",

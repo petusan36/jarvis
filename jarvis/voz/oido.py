@@ -172,7 +172,16 @@ class Oido:
         if self.verificador is None or self.referencia_voz is None:
             return True
         try:
-            return self.verificador.coincide(audio, self.referencia_voz)
+            # similitud() es opcional (VerificadorRoto no la tiene): cuando
+            # está, se usa para loguear el número real, no solo sí/no — así
+            # JARVIS_VOZ_UMBRAL se puede calibrar con datos de uso real en
+            # vez de a ciegas (ver UMBRAL_POR_DEFECTO en jarvis.voz.hablante).
+            if hasattr(self.verificador, "similitud"):
+                score = self.verificador.similitud(audio, self.referencia_voz)
+                coincide = score >= self.verificador.umbral
+            else:
+                score = None
+                coincide = self.verificador.coincide(audio, self.referencia_voz)
         except Exception:
             # Fallo cerrado, no abierto: el audio lo controla quien habla, así
             # que un error del verificador (p. ej. una grabación corrupta a
@@ -180,7 +189,17 @@ class Oido:
             # una forma trivial de saltarse el gate de las herramientas que
             # requieren su voz. Al no ser el dueño, Jarvis solo le niega esas
             # acciones; sigue respondiendo preguntas con normalidad.
+            print("(voz: el verificador falló al comparar esta frase — tratada como no-dueño)")
             return False
+        # Se imprime siempre (no solo cuando falla) porque antes no había
+        # ningún rastro de qué decidió el verificador por frase — sin esto,
+        # un reporte de "no me reconoció" no se puede auditar después: no
+        # hay forma de saber si el gate corrió y qué vio.
+        if not coincide:
+            detalle = f" (similitud {score:.3f} < umbral {self.verificador.umbral:.2f})" if score is not None else ""
+            print(f"(voz: esta frase no coincide con el dueño enrolado{detalle} — las "
+                  "herramientas que requieren su voz se van a negar este turno)")
+        return coincide
 
     def vigilar_interrupcion(self, palabra: str, detener_vigia: threading.Event,
                              al_detectar) -> threading.Event:

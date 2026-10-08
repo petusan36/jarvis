@@ -32,6 +32,17 @@ from .proveedores import (
 TIMEOUT_LOGIN_VENTANA_SEGUNDOS = 180  # cuánto esperar, pollendo, un login en la Terminal que se abrió
 ESPERA_ENTRE_POLLEOS_SEGUNDOS = 1.5
 
+# Modelos de Claude vigentes a través de Claude Code (suscripción), nombres
+# de API reales — a diferencia de Codex (ver MODELO_POR_DEFECTO en
+# codex_responses_adaptador.py), Claude Code sí acepta elegir entre estos.
+# Puede quedar desactualizada si Anthropic libera modelos nuevos.
+MODELOS_CLAUDE = [
+    "claude-opus-5-5",
+    "claude-sonnet-5-5",
+    "claude-haiku-4-5-20251001",
+    "claude-fable-5-1",
+]
+
 
 def _crear_memoria(config: Config):
     """Construye el adaptador de memoria permanente (graphiti + ladybug +
@@ -71,12 +82,6 @@ def _crear_cerebro(config: Config, forzar_menu: bool = False):
     La única clave que Jarvis todavía puede usar es ANTHROPIC_API_KEY si
     ya está en el entorno (uso directo de la API, sin pasar por ningún
     menú — comportamiento previo a todo esto, sin cambios)."""
-    herramientas = Herramientas(
-        config.carpeta_datos,
-        youtube_api_key=config.youtube_api_key,
-        memoria=_crear_memoria(config) if config.memoria_habilitada else None,
-        config=config,
-    )
     if sys.stdin.isatty():
         # Hay una terminal real (ej. corriste `python -m jarvis` a mano): el
         # menú de siempre, por input()/print(). Esto no cambia aunque haya
@@ -96,20 +101,55 @@ def _crear_cerebro(config: Config, forzar_menu: bool = False):
             "con un modelo de IA. Abrí una terminal y ejecutá python -m jarvis."
         )
     config = Config.desde_entorno()
+    # Construida DESPUÉS del menú, con el config final: si Herramientas se
+    # construyera antes (con el config de antes del menú), guardar_nombre
+    # mutaría un objeto Config que Cerebro ya no usa — el nombre quedaría
+    # bien guardado en .env, pero nunca se vería en lo que queda de esta
+    # sesión (confirmado en vivo: Jarvis seguía despidiéndose con el
+    # nombre viejo después de confirmar uno nuevo).
+    herramientas = Herramientas(
+        config.carpeta_datos,
+        youtube_api_key=config.youtube_api_key,
+        memoria=_crear_memoria(config) if config.memoria_habilitada else None,
+        config=config,
+    )
+    # config.modelo/JARVIS_MODELO es un solo campo compartido entre los tres
+    # motores, pero cada uno tiene su propio espacio de nombres de modelos
+    # (tags de Ollama como "qwen3:8b", nombres de Claude, nombres de Codex)
+    # — si quedó fijado para Ollama (motor=api) y después se elige
+    # suscripción o Codex, NO sirve para el motor nuevo. Confirmado en vivo:
+    # Codex devolvía 400 ("'qwen3:8b' no soportado") porque _crear_cerebro
+    # mandaba ese valor tal cual. _es_modelo_ollama (heurística: los tags de
+    # Ollama llevan ":", los de Claude/Codex no) decide si hay que ignorarlo
+    # y usar el default del motor nuevo en vez de "¿sigue en el default
+    # genérico?" (que no detecta este caso: un modelo de Ollama elegido a
+    # propósito no es el default genérico, pero tampoco sirve acá).
     if motor in ("suscripcion", "suscripción"):
         from .cerebro_suscripcion import CerebroSuscripcion
         print("(usando tu suscripción de Claude a través de Claude Code)")
+        if _es_modelo_ollama(config.modelo):
+            config.modelo = Config().modelo
         return CerebroSuscripcion(config, herramientas)
     if motor == "codex":
         print("(usando tu sesión de Codex)")
         adaptador = AdaptadorCodexResponses()  # valida la sesión (RuntimeError si no hay o venció)
-        if config.modelo == Config().modelo:  # nadie fijó JARVIS_MODELO a mano
+        if config.modelo == Config().modelo or _es_modelo_ollama(config.modelo):
             config.modelo = MODELO_CODEX_POR_DEFECTO
         return Cerebro(config, herramientas, adaptador)
     if motor != "api":
         raise RuntimeError(f"JARVIS_MOTOR no válido: {config.motor} (usa api, suscripcion, codex o auto)")
     adaptador = _crear_adaptador(config)
     return Cerebro(config, herramientas, adaptador)
+
+
+def _es_modelo_ollama(modelo: str) -> bool:
+    """¿Este valor de config.modelo es un tag de Ollama ("qwen3:8b",
+    "llama3.1:8b"...), no un nombre de modelo de Claude/Codex? Los tags de
+    Ollama siempre llevan ":" (repo:tag); los nombres de Claude/Codex,
+    nunca — heurística simple, pero alcanza para detectar el caso real:
+    un modelo elegido para motor=api/proveedor=ollama que quedó guardado
+    en JARVIS_MODELO y no sirve si después se elige otro motor."""
+    return ":" in modelo
 
 
 def _crear_adaptador(config: Config):
@@ -244,6 +284,54 @@ def _guardar_motor(motor: str) -> str:
     return motor
 
 
+def _guardar_modelo_y_esfuerzo(modelo: str, esfuerzo: str) -> None:
+    """Persiste modelo + nivel de esfuerzo para el proveedor en la nube
+    recién elegido: la parte que comparten el menú de consola y el de
+    ventana. ``esfuerzo`` ya viene validado (low/medium/high) por quien
+    llama — acá no se vuelve a chequear."""
+    guardar_en_env("JARVIS_MODELO", modelo)
+    guardar_en_env("JARVIS_ESFUERZO", esfuerzo)
+    os.environ["JARVIS_MODELO"] = modelo
+    os.environ["JARVIS_ESFUERZO"] = esfuerzo
+
+
+def _elegir_modelo_y_esfuerzo_consola(nombre: str, modelo_actual: str, modelos: list[str] | None) -> None:
+    """Pregunta modelo y nivel de esfuerzo en la terminal, y los persiste.
+
+    ``modelos``: lista cerrada para elegir (ver ``MODELOS_CLAUDE``), o
+    ``None`` si el proveedor no admite elegir modelo (Codex con cuenta de
+    ChatGPT: solo acepta el modelo interno real de esa cuenta — cualquier
+    otro nombre, público o no, responde 400 "not supported", ver
+    ``codex_responses_adaptador.MODELO_POR_DEFECTO``). Con lista, se elige
+    por número, nunca texto libre: a diferencia de un modelo local de
+    Ollama (que Jarvis no puede enumerar de antemano), acá si hay lista es
+    porque son los únicos nombres válidos — dejar texto libre solo
+    invitaría a escribir uno que no existe."""
+    if modelos:
+        print(f"¿Qué modelo de {nombre} querés usar?")
+        for i, m in enumerate(modelos, start=1):
+            marca = " (actual)" if m == modelo_actual else ""
+            print(f"  {i}) {m}{marca}")
+        try:
+            eleccion = input(f"Elige 1-{len(modelos)} (Enter para el actual): ").strip()
+        except (EOFError, KeyboardInterrupt):
+            eleccion = ""
+        modelo = modelos[int(eleccion) - 1] if eleccion.isdigit() and 1 <= int(eleccion) <= len(modelos) else modelo_actual
+    else:
+        modelo = modelo_actual
+        print(f"(modelo fijo para {nombre}: {modelo} — esta cuenta solo acepta ese modelo interno)")
+
+    print("¿Qué nivel de esfuerzo? 1) low (más rápido)  2) medium  3) high (más lento, más cuidado)")
+    try:
+        eleccion = input("Elige 1-3 (Enter para low): ").strip()
+    except (EOFError, KeyboardInterrupt):
+        eleccion = ""
+    esfuerzo = {"1": "low", "2": "medium", "3": "high"}.get(eleccion, "low")
+
+    _guardar_modelo_y_esfuerzo(modelo, esfuerzo)
+    print(f"(modelo: {modelo}, esfuerzo: {esfuerzo}; guardado en .env)")
+
+
 def _configurar_claude() -> str:
     """Usa tu sesión de Claude Code (sin clave de API). Si todavía no
     iniciaste sesión, Jarvis mismo la dispara en vez de pedirte que abras
@@ -281,6 +369,7 @@ def _configurar_claude() -> str:
             )
     resultado = _guardar_motor("suscripcion")
     print("(usando tu suscripción de Claude; elección guardada en .env)")
+    _elegir_modelo_y_esfuerzo_consola("Claude", Config().modelo, MODELOS_CLAUDE)
     return resultado
 
 
@@ -317,6 +406,7 @@ def _configurar_codex() -> str:
             )
     resultado = _guardar_motor("codex")
     print("(usando tu sesión de Codex; elección guardada en .env)")
+    _elegir_modelo_y_esfuerzo_consola("Codex", MODELO_CODEX_POR_DEFECTO, None)
     return resultado
 
 
@@ -405,15 +495,16 @@ def _atender_menu_proveedor_ventana(servidor) -> str:
     if accion["tipo"] == "openai":
         return _atender_login_ventana(
             servidor, hay_sesion=_hay_sesion_codex, comando=["codex", "login"],
-            motor="codex", nombre="Codex",
+            motor="codex", nombre="Codex", modelo_actual=MODELO_CODEX_POR_DEFECTO, modelos=None,
         )
     return _atender_login_ventana(
         servidor, hay_sesion=_hay_sesion_claude, comando=["claude"],
-        motor="suscripcion", nombre="Claude Code",
+        motor="suscripcion", nombre="Claude Code", modelo_actual=Config().modelo, modelos=MODELOS_CLAUDE,
     )
 
 
-def _atender_login_ventana(servidor, *, hay_sesion, comando: list[str], motor: str, nombre: str) -> str:
+def _atender_login_ventana(servidor, *, hay_sesion, comando: list[str], motor: str, nombre: str,
+                           modelo_actual: str, modelos: list[str] | None) -> str:
     """Dispara (si hace falta) el login de un proveedor en la nube desde la
     ventana. A diferencia del menú de consola (``_configurar_claude``/
     ``_configurar_codex``), acá Jarvis NO tiene una terminal propia que
@@ -423,9 +514,10 @@ def _atender_login_ventana(servidor, *, hay_sesion, comando: list[str], motor: s
     pollea ``hay_sesion()`` sin bloquear la ventana hasta detectar que el
     login terminó o se agota ``TIMEOUT_LOGIN_VENTANA_SEGUNDOS``."""
     if hay_sesion():
-        servidor.actualizar(paso="hecho", mensaje=f"Ya había una sesión de {nombre} activa.")
         print(f"(ya había sesión de {nombre} activa; usando motor={motor})")
-        return _guardar_motor(motor)
+        resultado = _guardar_motor(motor)
+        _atender_modelo_esfuerzo_ventana(servidor, nombre, modelo_actual, modelos)
+        return resultado
 
     servidor.actualizar(
         paso="esperando_login",
@@ -445,9 +537,10 @@ def _atender_login_ventana(servidor, *, hay_sesion, comando: list[str], motor: s
     limite = time.monotonic() + TIMEOUT_LOGIN_VENTANA_SEGUNDOS
     while time.monotonic() < limite:
         if hay_sesion():
-            servidor.actualizar(paso="hecho", mensaje=f"Sesión de {nombre} activa.")
             print(f"(login de {nombre} completado; usando motor={motor})")
-            return _guardar_motor(motor)
+            resultado = _guardar_motor(motor)
+            _atender_modelo_esfuerzo_ventana(servidor, nombre, modelo_actual, modelos)
+            return resultado
         time.sleep(ESPERA_ENTRE_POLLEOS_SEGUNDOS)
 
     raise RuntimeError(
@@ -455,6 +548,29 @@ def _atender_login_ventana(servidor, *, hay_sesion, comando: list[str], motor: s
         f"{TIMEOUT_LOGIN_VENTANA_SEGUNDOS}s. Completá el inicio de sesión en la "
         "Terminal que se abrió y volvé a abrir Jarvis."
     )
+
+
+def _atender_modelo_esfuerzo_ventana(servidor, nombre: str, modelo_actual: str,
+                                     modelos: list[str] | None) -> None:
+    """Último paso del menú en ventana, una vez que el proveedor ya tiene
+    sesión activa: pide modelo y nivel de esfuerzo, y los persiste.
+    Equivalente en ventana de ``_elegir_modelo_y_esfuerzo_consola`` — mismo
+    motivo para la lista cerrada en vez de texto libre cuando ``modelos``
+    no es ``None`` (ver esa función)."""
+    servidor.actualizar(paso="modelo_esfuerzo", nombre=nombre, modelo_actual=modelo_actual, modelos=modelos)
+    accion = servidor.esperar_accion(timeout=TIMEOUT_LOGIN_VENTANA_SEGUNDOS)
+    if not accion or accion.get("tipo") != "modelo_esfuerzo":
+        raise RuntimeError("No se eligió modelo ni nivel de esfuerzo (se agotó el tiempo de espera).")
+
+    modelo_elegido = accion.get("modelo")
+    if modelos:
+        modelo = modelo_elegido if modelo_elegido in modelos else modelo_actual
+    else:
+        modelo = modelo_actual  # sin lista: el único valor válido es el actual, no se puede elegir otro
+    esfuerzo = accion.get("esfuerzo") if accion.get("esfuerzo") in ("low", "medium", "high") else "low"
+    _guardar_modelo_y_esfuerzo(modelo, esfuerzo)
+    servidor.actualizar(paso="hecho", mensaje=f"Usando {nombre}: modelo {modelo}, esfuerzo {esfuerzo}.")
+    print(f"(modelo: {modelo}, esfuerzo: {esfuerzo}; guardado en .env)")
 
 
 def _abrir_terminal_con_comando(comando: list[str]) -> None:

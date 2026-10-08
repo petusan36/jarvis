@@ -106,13 +106,22 @@ class Config:
     elevenlabs_modelo: str = ""
     youtube_api_key: str = ""  # opcional: sin ella, "reproducir música" abre los resultados y elige el usuario
     memoria_habilitada: bool = True  # memoria permanente (ver jarvis.memoria); requiere ollama + nomic-embed-text
-    memoria_modelo_llm: str = "qwen3:8b"  # modelo de Ollama para extracción de entidades (graphiti)
+    # Modelo de Ollama para extracción de entidades (graphiti). Deliberadamente
+    # más chico que el modelo de chat (qwen3:8b): la extracción usa
+    # structured_output_mode="json_schema" (decodificación restringida por
+    # grámatica, no tool-calling), así que el JSON válido lo garantiza el
+    # motor de inferencia, no el modelo — lo que importa para esta tarea es
+    # velocidad, no tool-calling. Medido en vivo: con qwen3:8b para las dos
+    # cosas, confirmar un "recordar" tardaba 3-5 minutos (dos inferencias
+    # secuenciales de 8B en CPU/Metal, M2 Pro).
+    memoria_modelo_llm: str = "qwen3:4b"
     memoria_modelo_embedding: str = "nomic-embed-text"
     memoria_ventana_gracia_dias: int = 180  # cuánto tardan los hechos invalidados en archivarse en frío
-    # Reconocimiento de hablante (ver jarvis.voz.hablante): mientras no haya
-    # voz enrolada (--enrolar-voz), no exige nada, igual que siempre.
+    # Reconocimiento de hablante (ver jarvis.voz.hablante): se enrola solo
+    # en el primer arranque en modo voz si está habilitado y todavía no hay
+    # referencia (ver jarvis.__main__._cargar_reconocimiento_voz).
     reconocimiento_voz_habilitado: bool = True
-    umbral_voz_dueño: float = 0.75
+    umbral_voz_dueño: float = 0.40  # ver UMBRAL_POR_DEFECTO en jarvis.voz.hablante
     # Modo de escucha pasiva (ver jarvis.voz.oido.Oido.dormir): tras este
     # tiempo sin una frase real dirigida a Jarvis, entra solo en reposo y
     # solo vuelve a atender si lo nombrás. 0 desactiva el reposo automático

@@ -16,10 +16,17 @@ Flujo:
    marcadas con ``requiere_dueño=True`` (ver herramientas.py) se niegan a
    ejecutarse — Jarvis lo explica y sigue escuchando.
 
-Umbral provisional: no pudo calibrarse con voces humanas reales distintas en
-esta tarea (sin micrófono en el entorno de desarrollo, solo verificado que el
-modelo carga y produce embeddings comparables). Si Jarvis rechaza tu propia
-voz, o acepta la de otra persona, ajustá JARVIS_VOZ_UMBRAL en ~/.jarvis/.env.
+Umbral: bajado dos veces con datos reales, no a ciegas. Primero de 0,75 a
+0,55 (0,75 ya rechazaba al dueño el 100% de las veces). Con el log de
+similitud real (ver jarvis.voz.oido._coincide_con_dueño) se midieron tres
+turnos reales de la MISMA persona enrolada: 0.513, 0.508, 0.412 — todos por
+debajo de 0,55 también. Bajado a 0,40 para cubrir ese rango observado. Sigue
+sin ser un valor calibrado con un dataset real de voces distintas (no hay
+medición de cuánto sube el riesgo de aceptar a un impostor al bajar el
+umbral) — es la mejor estimación posible con los datos de uso real
+disponibles hasta ahora. Si Jarvis rechaza tu propia voz, o acepta la de
+otra persona, ajustá JARVIS_VOZ_UMBRAL en ~/.jarvis/.env con el número que
+el log te muestre en cada rechazo.
 """
 
 from __future__ import annotations
@@ -29,11 +36,25 @@ from pathlib import Path
 import numpy as np
 
 MODELO = "speechbrain/spkrec-ecapa-voxceleb"
-UMBRAL_POR_DEFECTO = 0.75
+UMBRAL_POR_DEFECTO = 0.40
 
 
 class NoInstalado(RuntimeError):
     """Falta el soporte de reconocimiento de hablante."""
+
+
+class VerificadorRoto:
+    """Se usa cuando SÍ hay una voz enrolada pero el verificador real no
+    pudo cargar (dependencia rota, modelo corrupto, sin espacio en disco,
+    etc.) — a diferencia de no pasar ningún verificador (nadie enroló nada
+    todavía, no se exige nada), acá el usuario SÍ optó por el
+    reconocimiento de voz. Fallar cerrado, no abierto: mientras el
+    verificador real no cargue, cualquier herramienta con
+    ``requiere_dueño=True`` se niega para cualquier voz, en vez de
+    ejecutarse para todas como si nunca se hubiera enrolado nada."""
+
+    def coincide(self, audio: np.ndarray, referencia: np.ndarray) -> bool:
+        return False
 
 
 class VerificadorHablante:
@@ -60,9 +81,16 @@ class VerificadorHablante:
             resultado = self._clasificador.encode_batch(tensor)
         return resultado.squeeze().numpy()
 
+    def similitud(self, audio: np.ndarray, referencia: np.ndarray) -> float:
+        """Similitud coseno cruda entre ``audio`` y ``referencia``, sin
+        aplicar el umbral — expuesto aparte de ``coincide`` para poder
+        registrar el valor real y calibrar JARVIS_VOZ_UMBRAL con datos de
+        uso real en vez de a ciegas (ver UMBRAL_POR_DEFECTO)."""
+        return similitud_coseno(self.embedding(audio), referencia)
+
     def coincide(self, audio: np.ndarray, referencia: np.ndarray) -> bool:
         """¿La voz de ``audio`` es la de ``referencia``, según el umbral?"""
-        return similitud_coseno(self.embedding(audio), referencia) >= self.umbral
+        return self.similitud(audio, referencia) >= self.umbral
 
 
 def similitud_coseno(a: np.ndarray, b: np.ndarray) -> float:
@@ -91,13 +119,32 @@ def ruta_referencia(carpeta_datos: Path) -> Path:
 def enrolar_voz(config) -> Path:
     """Graba una frase de referencia por el micrófono y la guarda como la voz
     del dueño de Jarvis. Pensado para ``jarvis --enrolar-voz`` (ver
-    __main__.py): CLI directa, no pasa por Oido (que ya asume un verificador
-    configurado, justo lo que esto crea)."""
+    __main__.py): CLI directa para re-enrolar a mano cuando se quiera
+    reemplazar la referencia existente."""
+    input("🎙  Pulsa Enter y hablá sin parar unos segundos (cualquier frase sirve)...")
+    return _grabar_y_guardar(config)
+
+
+def enrolar_voz_automatico(config, anunciar=print) -> Path:
+    """Como ``enrolar_voz``, pero sin esperar una tecla: graba automáticamente
+    tras un conteo. Se usa al arrancar Jarvis en modo voz cuando el
+    reconocimiento de hablante está habilitado (por defecto) y todavía no hay
+    ninguna voz enrolada — así queda activo desde el primer uso, sin que el
+    usuario tenga que descubrir y correr ``--enrolar-voz`` por separado (ni
+    hay terminal real para pulsar Enter cuando Jarvis corre como app de
+    escritorio sin consola). ``anunciar``: cómo avisarle al usuario (por
+    defecto ``print``; quien llame puede pasar también la síntesis de voz)."""
+    import time
+
+    anunciar("🎙  Para identificar su voz, grabo una muestra en 3 segundos — hable con naturalidad.")
+    time.sleep(3)
+    return _grabar_y_guardar(config)
+
+
+def _grabar_y_guardar(config, segundos: int = 6) -> Path:
     import sounddevice as sd
 
     frecuencia = 16000
-    segundos = 6
-    input(f"🎙  Pulsa Enter y hablá sin parar unos {segundos} segundos (cualquier frase sirve)...")
     print("⏺  Grabando...")
     audio = sd.rec(int(segundos * frecuencia), samplerate=frecuencia, channels=1, dtype="float32")
     sd.wait()
