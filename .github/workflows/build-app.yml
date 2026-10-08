@@ -63,6 +63,13 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y espeak-ng portaudio19-dev libsndfile1
 
+      # Ver el mismo paso en release.yml: sin esto, pip trae CUDA completo
+      # en Linux (varios GB) que Jarvis no necesita (Whisper/Kokoro van
+      # bien en CPU).
+      - name: Instalar torch/torchaudio CPU-only (Linux)
+        if: matrix.nombre == 'linux'
+        run: pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
+
       - name: Instalar jarvis con el grupo "build"
         run: pip install -e ".[build]"
 
