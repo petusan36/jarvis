@@ -19,6 +19,12 @@
   .lista-modelos { display: flex; flex-direction: column; gap: 8px; width: 100%; max-width: 360px;
     max-height: 260px; overflow-y: auto; }
   .lista-modelos button { width: 100%; text-align: left; }
+  .lista-modelos button.elegido, .esfuerzo button.elegido { border-color: var(--cian); color: var(--cian); }
+  .formulario { display: flex; flex-direction: column; gap: 14px; width: 100%; max-width: 360px; }
+  label { font-size: 13px; color: #9fb4c2; }
+  .esfuerzo { display: flex; gap: 8px; }
+  .esfuerzo button { flex: 1; min-width: 0; text-align: center; }
+  #b-continuar { align-self: center; margin-top: 4px; }
   .spinner { width: 26px; height: 26px; border: 3px solid var(--borde); border-top-color: var(--cian);
     border-radius: 50%; animation: girar 1s linear infinite; margin: 0 auto 16px; }
   @keyframes girar { to { transform: rotate(360deg); } }
@@ -39,9 +45,18 @@ async function elegir(accion) {
   });
 }
 
+let pasoRenderizado = null;
+
 function render(estado) {
   const app = document.getElementById("app");
   const paso = estado.paso || "inicio";
+  // Sin esto, cada poll (cada 400ms) reconstruye el HTML entero y borra lo
+  // que el usuario esté escribiendo en el campo de modelo del paso
+  // "modelo_esfuerzo" — un re-render de más ahí resetea el formulario a
+  // mitad de tipeo. Mismo paso que el anterior: no hay nada nuevo que
+  // mostrar, así que no se toca el DOM.
+  if (paso === pasoRenderizado) return;
+  pasoRenderizado = paso;
 
   if (paso === "inicio") {
     app.innerHTML = `
@@ -77,6 +92,60 @@ function render(estado) {
       </div>`;
     document.getElementById("b-openai").onclick = () => elegir({ tipo: "openai" });
     document.getElementById("b-anthropic").onclick = () => elegir({ tipo: "anthropic" });
+    return;
+  }
+
+  if (paso === "modelo_esfuerzo") {
+    const modeloActual = estado.modelo_actual || "";
+    const modelos = estado.modelos || null;
+    // Con lista cerrada (Claude): elegir por botón, nunca texto libre —
+    // Codex (modelos=null) solo acepta un modelo interno fijo por cuenta,
+    // así que ahí ni se ofrece elegir (ver _atender_modelo_esfuerzo_ventana).
+    const seccionModelo = modelos
+      ? `<div>
+          <label>Modelo</label>
+          <div class="lista-modelos">${modelos.map((m) =>
+            `<button data-modelo="${m}" class="${m === modeloActual ? "elegido" : ""}">${m}${m === modeloActual ? " (actual)" : ""}</button>`
+          ).join("")}</div>
+        </div>`
+      : `<p class="ayuda">Modelo fijo para ${estado.nombre || "este proveedor"}: <strong>${modeloActual}</strong></p>`;
+    app.innerHTML = `
+      <h1>${estado.nombre || "Proveedor"}: modelo y esfuerzo</h1>
+      <div class="formulario">
+        ${seccionModelo}
+        <div>
+          <label>Nivel de esfuerzo</label>
+          <div class="esfuerzo">
+            <button data-esfuerzo="low" class="elegido">low</button>
+            <button data-esfuerzo="medium">medium</button>
+            <button data-esfuerzo="high">high</button>
+          </div>
+        </div>
+        <button id="b-continuar">Continuar</button>
+      </div>`;
+    let modeloElegido = modeloActual;
+    if (modelos) {
+      const botonesModelo = [...app.querySelectorAll("[data-modelo]")];
+      botonesModelo.forEach((boton) => {
+        boton.onclick = () => {
+          modeloElegido = boton.dataset.modelo;
+          botonesModelo.forEach((b) => b.classList.toggle("elegido", b === boton));
+        };
+      });
+    }
+    let esfuerzoElegido = "low";
+    const botonesEsfuerzo = [...app.querySelectorAll("[data-esfuerzo]")];
+    botonesEsfuerzo.forEach((boton) => {
+      boton.onclick = () => {
+        esfuerzoElegido = boton.dataset.esfuerzo;
+        botonesEsfuerzo.forEach((b) => b.classList.toggle("elegido", b === boton));
+      };
+    });
+    document.getElementById("b-continuar").onclick = () => elegir({
+      tipo: "modelo_esfuerzo",
+      modelo: modeloElegido,
+      esfuerzo: esfuerzoElegido,
+    });
     return;
   }
 

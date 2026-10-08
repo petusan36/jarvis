@@ -473,7 +473,8 @@ def test_menu_siempre_corre_incluso_con_todo_configurado(monkeypatch, tmp_path):
     monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
     monkeypatch.setattr("jarvis.conexion_ia._hay_sesion_claude", lambda: True)
     monkeypatch.setattr("sys.stdin.isatty", lambda: True)
-    entradas = iter(["2", "2"])  # proveedor en la nube -> Anthropic (ya logueado)
+    # proveedor en la nube -> Anthropic (ya logueado) -> modelo/esfuerzo (Enter = defaults)
+    entradas = iter(["2", "2", "", ""])
     monkeypatch.setattr("builtins.input", lambda _="": next(entradas))
 
     cerebro = _crear_cerebro(Config(carpeta_datos=tmp_path))
@@ -603,6 +604,7 @@ def test_configurar_claude_sin_sesion_dispara_login_y_verifica(monkeypatch):
         return NS(returncode=0)
 
     monkeypatch.setattr("jarvis.conexion_ia.subprocess.run", login_falso)
+    monkeypatch.setattr("builtins.input", lambda _="": "")  # modelo/esfuerzo: Enter = defaults
 
     assert _configurar_claude() == "suscripcion"
     assert llamadas == [["claude"]]
@@ -618,6 +620,7 @@ def test_configurar_claude_ya_logueado_no_dispara_login(monkeypatch):
         pytest.fail("no debería intentar loguear si ya hay sesión")
 
     monkeypatch.setattr("jarvis.conexion_ia.subprocess.run", login_que_no_debe_llamarse)
+    monkeypatch.setattr("builtins.input", lambda _="": "")
 
     assert _configurar_claude() == "suscripcion"
 
@@ -661,6 +664,7 @@ def test_configurar_codex_sin_sesion_dispara_login_y_verifica(monkeypatch):
         return NS(returncode=0)
 
     monkeypatch.setattr("jarvis.conexion_ia.subprocess.run", login_falso)
+    monkeypatch.setattr("builtins.input", lambda _="": "")  # modelo/esfuerzo: Enter = defaults
 
     assert _configurar_codex() == "codex"
     assert llamadas == [["codex", "login"]]
@@ -676,8 +680,41 @@ def test_configurar_codex_ya_logueado_no_dispara_login(monkeypatch):
         pytest.fail("no debería intentar loguear si ya hay sesión")
 
     monkeypatch.setattr("jarvis.conexion_ia.subprocess.run", login_que_no_debe_llamarse)
+    monkeypatch.setattr("builtins.input", lambda _="": "")
 
     assert _configurar_codex() == "codex"
+
+
+def test_configurar_claude_guarda_modelo_y_esfuerzo_elegidos(monkeypatch, tmp_path):
+    """Roadmap punto 4: el menú de proveedor en la nube también deja elegir
+    modelo y nivel de esfuerzo, no solo el proveedor."""
+    from jarvis.conexion_ia import _configurar_claude
+
+    monkeypatch.setattr("jarvis.config._RUTA_ENV_POR_DEFECTO", tmp_path / ".env")
+    monkeypatch.setattr("jarvis.conexion_ia._hay_sesion_claude", lambda: True)
+    entradas = iter(["2", "3"])  # modelo 2) claude-sonnet-5-5, esfuerzo=high
+    monkeypatch.setattr("builtins.input", lambda _="": next(entradas))
+
+    _configurar_claude()
+
+    assert os.environ["JARVIS_MODELO"] == "claude-sonnet-5-5"
+    assert os.environ["JARVIS_ESFUERZO"] == "high"
+    assert "JARVIS_MODELO=claude-sonnet-5-5" in (tmp_path / ".env").read_text()
+    assert "JARVIS_ESFUERZO=high" in (tmp_path / ".env").read_text()
+
+
+def test_configurar_codex_modelo_y_esfuerzo_en_blanco_usa_defaults(monkeypatch, tmp_path):
+    from jarvis.conexion_ia import _configurar_codex
+    from jarvis.proveedores import MODELO_CODEX_POR_DEFECTO
+
+    monkeypatch.setattr("jarvis.config._RUTA_ENV_POR_DEFECTO", tmp_path / ".env")
+    monkeypatch.setattr("jarvis.conexion_ia._hay_sesion_codex", lambda: True)
+    monkeypatch.setattr("builtins.input", lambda _="": "")  # Enter en ambas preguntas
+
+    _configurar_codex()
+
+    assert os.environ["JARVIS_MODELO"] == MODELO_CODEX_POR_DEFECTO
+    assert os.environ["JARVIS_ESFUERZO"] == "low"
 
 
 def test_configurar_codex_login_no_deja_sesion_activa_falla(monkeypatch):
@@ -905,11 +942,57 @@ def test_menu_ventana_camino_proveedor_ya_logueado_no_abre_terminal(monkeypatch,
         pytest.fail("no debería abrir una Terminal si ya hay sesión")
 
     monkeypatch.setattr("jarvis.conexion_ia._abrir_terminal_con_comando", terminal_que_no_debe_abrirse)
-    servidor = _ServidorMenuFalso([{"tipo": "proveedor"}, {"tipo": "anthropic"}])
+    servidor = _ServidorMenuFalso([
+        {"tipo": "proveedor"}, {"tipo": "anthropic"},
+        {"tipo": "modelo_esfuerzo", "modelo": "", "esfuerzo": "low"},
+    ])
     _correr_ventana_falsa(monkeypatch, servidor)
 
     assert _menu_conexion_ia_ventana() == "suscripcion"
     assert os.environ["JARVIS_MOTOR"] == "suscripcion"
+
+
+def test_menu_ventana_guarda_modelo_y_esfuerzo_elegidos(monkeypatch, tmp_path):
+    """Equivalente en ventana de test_configurar_claude_guarda_modelo_y_esfuerzo_elegidos."""
+    from jarvis.conexion_ia import _menu_conexion_ia_ventana
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("jarvis.config._RUTA_ENV_POR_DEFECTO", tmp_path / ".env")
+    monkeypatch.setattr("jarvis.conexion_ia._hay_sesion_claude", lambda: True)
+    servidor = _ServidorMenuFalso([
+        {"tipo": "proveedor"}, {"tipo": "anthropic"},
+        {"tipo": "modelo_esfuerzo", "modelo": "claude-haiku-4-5-20251001", "esfuerzo": "medium"},
+    ])
+    _correr_ventana_falsa(monkeypatch, servidor)
+
+    assert _menu_conexion_ia_ventana() == "suscripcion"
+    assert os.environ["JARVIS_MODELO"] == "claude-haiku-4-5-20251001"
+    assert os.environ["JARVIS_ESFUERZO"] == "medium"
+    # último estado mostrado antes de "hecho" debe ofrecer el modelo actual como default
+    paso_formulario = next(e for e in servidor.estados if e.get("paso") == "modelo_esfuerzo")
+    assert paso_formulario["modelo_actual"] == Config().modelo
+
+
+def test_menu_ventana_codex_ignora_modelo_arbitrario(monkeypatch, tmp_path):
+    """Codex con cuenta de ChatGPT solo acepta su modelo interno real
+    (ver MODELO_POR_DEFECTO en codex_responses_adaptador.py): aunque la
+    acción mande otro nombre, se debe ignorar y quedarse con el fijo."""
+    from jarvis.conexion_ia import _menu_conexion_ia_ventana
+    from jarvis.proveedores import MODELO_CODEX_POR_DEFECTO
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("jarvis.config._RUTA_ENV_POR_DEFECTO", tmp_path / ".env")
+    monkeypatch.setattr("jarvis.conexion_ia._hay_sesion_codex", lambda: True)
+    servidor = _ServidorMenuFalso([
+        {"tipo": "proveedor"}, {"tipo": "openai"},
+        {"tipo": "modelo_esfuerzo", "modelo": "gpt-5-cualquier-cosa", "esfuerzo": "medium"},
+    ])
+    _correr_ventana_falsa(monkeypatch, servidor)
+
+    assert _menu_conexion_ia_ventana() == "codex"
+    assert os.environ["JARVIS_MODELO"] == MODELO_CODEX_POR_DEFECTO
+    paso_formulario = next(e for e in servidor.estados if e.get("paso") == "modelo_esfuerzo")
+    assert paso_formulario["modelos"] is None
 
 
 def test_menu_ventana_camino_proveedor_sin_sesion_abre_terminal_y_pollea(monkeypatch, tmp_path):
@@ -926,7 +1009,10 @@ def test_menu_ventana_camino_proveedor_sin_sesion_abre_terminal_y_pollea(monkeyp
 
     monkeypatch.setattr("jarvis.conexion_ia._abrir_terminal_con_comando", abrir_terminal_falso)
     monkeypatch.setattr("jarvis.conexion_ia.time.sleep", lambda _s: None)
-    servidor = _ServidorMenuFalso([{"tipo": "proveedor"}, {"tipo": "openai"}])
+    servidor = _ServidorMenuFalso([
+        {"tipo": "proveedor"}, {"tipo": "openai"},
+        {"tipo": "modelo_esfuerzo", "modelo": "", "esfuerzo": "low"},
+    ])
     _correr_ventana_falsa(monkeypatch, servidor)
 
     assert _menu_conexion_ia_ventana() == "codex"
