@@ -7,8 +7,9 @@ ECAPA-TDNN, ``speechbrain/spkrec-ecapa-voxceleb``): local, descarga el modelo
 
 Flujo:
 
-1. Enrolamiento (una vez): se grava una frase de referencia del usuario y se
-   guarda su "huella de voz" (embedding) en ``~/.jarvis/voz_dueño.npy`` (ver
+1. Enrolamiento (una vez): se graban varias frases cortas de referencia del
+   usuario (ver ``N_FRASES_ENROLAMIENTO``) y se guarda el PROMEDIO de sus
+   "huellas de voz" (embeddings) en ``~/.jarvis/voz_dueño.npy`` (ver
    ``ruta_referencia`` en config.py).
 2. En cada frase que Jarvis escuche (``Oido.escuchar``), calcula su embedding
    y lo compara por similitud coseno contra el enrolado. Por encima del
@@ -16,17 +17,24 @@ Flujo:
    marcadas con ``requiere_dueño=True`` (ver herramientas.py) se niegan a
    ejecutarse — Jarvis lo explica y sigue escuchando.
 
-Umbral: bajado dos veces con datos reales, no a ciegas. Primero de 0,75 a
-0,55 (0,75 ya rechazaba al dueño el 100% de las veces). Con el log de
-similitud real (ver jarvis.voz.oido._coincide_con_dueño) se midieron tres
-turnos reales de la MISMA persona enrolada: 0.513, 0.508, 0.412 — todos por
-debajo de 0,55 también. Bajado a 0,40 para cubrir ese rango observado. Sigue
-sin ser un valor calibrado con un dataset real de voces distintas (no hay
-medición de cuánto sube el riesgo de aceptar a un impostor al bajar el
-umbral) — es la mejor estimación posible con los datos de uso real
-disponibles hasta ahora. Si Jarvis rechaza tu propia voz, o acepta la de
-otra persona, ajustá JARVIS_VOZ_UMBRAL en ~/.jarvis/.env con el número que
-el log te muestre en cada rechazo.
+Causa raíz real encontrada (no solo ajuste de umbral): el enrolamiento
+grababa una ÚNICA toma continua de 6s con ``sd.rec()`` directo, mientras que
+la verificación en uso real compara contra frases cortas recortadas por VAD
+(``Oido._grabar_continuo``) — formatos de audio distintos. Esa discrepancia
+por sí sola degradaba la similitud real (medida en vivo: 0.22-0.39) por
+debajo de cualquier umbral razonable, sin importar cuánto se bajara. Fix:
+el enrolamiento ahora graba con el mismo mecanismo de VAD que el uso real
+(``jarvis.voz.oido.grabar_frase_con_vad``), varias frases cortas, y promedia
+sus embeddings — así la referencia queda en las mismas condiciones que lo
+que se va a comparar después.
+
+Umbral: bajado dos veces con datos reales antes de encontrar la causa real
+de arriba. Primero de 0,75 a 0,55 (0,75 ya rechazaba al dueño el 100% de las
+veces), después a 0,40. Con el fix del enrolamiento la similitud real
+debería subir bastante — si Jarvis sigue rechazando tu propia voz, o acepta
+la de otra persona, ajustá JARVIS_VOZ_UMBRAL en ~/.jarvis/.env con el número
+que el log te muestre en cada rechazo (ver
+jarvis.voz.oido._coincide_con_dueño).
 """
 
 from __future__ import annotations
@@ -37,6 +45,7 @@ import numpy as np
 
 MODELO = "speechbrain/spkrec-ecapa-voxceleb"
 UMBRAL_POR_DEFECTO = 0.40
+N_FRASES_ENROLAMIENTO = 3  # promediar varias frases da una huella más estable que una sola toma
 
 
 class NoInstalado(RuntimeError):
@@ -117,16 +126,17 @@ def ruta_referencia(carpeta_datos: Path) -> Path:
 
 
 def enrolar_voz(config) -> Path:
-    """Graba una frase de referencia por el micrófono y la guarda como la voz
+    """Graba varias frases cortas de referencia por el micrófono (con el
+    mismo detector de voz que el uso real) y guarda el promedio como la voz
     del dueño de Jarvis. Pensado para ``jarvis --enrolar-voz`` (ver
     __main__.py): CLI directa para re-enrolar a mano cuando se quiera
     reemplazar la referencia existente."""
-    input("🎙  Pulsa Enter y hablá sin parar unos segundos (cualquier frase sirve)...")
-    return _grabar_y_guardar(config)
+    input(f"🎙  Pulsa Enter: vamos a grabar {N_FRASES_ENROLAMIENTO} frases cortas para reconocer tu voz...")
+    return _grabar_y_guardar(config, anunciar=print)
 
 
 def enrolar_voz_automatico(config, anunciar=print) -> Path:
-    """Como ``enrolar_voz``, pero sin esperar una tecla: graba automáticamente
+    """Como ``enrolar_voz``, pero sin esperar una tecla: arranca automático
     tras un conteo. Se usa al arrancar Jarvis en modo voz cuando el
     reconocimiento de hablante está habilitado (por defecto) y todavía no hay
     ninguna voz enrolada — así queda activo desde el primer uso, sin que el
@@ -136,23 +146,65 @@ def enrolar_voz_automatico(config, anunciar=print) -> Path:
     defecto ``print``; quien llame puede pasar también la síntesis de voz)."""
     import time
 
-    anunciar("🎙  Para identificar su voz, grabo una muestra en 3 segundos — hable con naturalidad.")
+    anunciar(
+        f"🎙  Para identificar su voz, voy a grabar {N_FRASES_ENROLAMIENTO} frases cortas — "
+        "hable con naturalidad después de cada aviso."
+    )
     time.sleep(3)
-    return _grabar_y_guardar(config)
+    return _grabar_y_guardar(config, anunciar=anunciar)
 
 
-def _grabar_y_guardar(config, segundos: int = 6) -> Path:
-    import sounddevice as sd
-
-    frecuencia = 16000
-    print("⏺  Grabando...")
-    audio = sd.rec(int(segundos * frecuencia), samplerate=frecuencia, channels=1, dtype="float32")
-    sd.wait()
-    audio = audio[:, 0]
-
+def _grabar_y_guardar(config, anunciar=print) -> Path:
+    """Graba ``N_FRASES_ENROLAMIENTO`` frases con
+    ``jarvis.voz.oido.grabar_frase_con_vad`` (mismo mecanismo que el uso
+    real, no una toma continua aparte — ver docstring del módulo) y guarda
+    el PROMEDIO de sus embeddings como referencia: una sola frase puede
+    salir atípica (ruido, carraspera); promediar varias da una huella más
+    representativa de la voz real de la persona."""
     verificador = VerificadorHablante(umbral=config.umbral_voz_dueño)
-    embedding = verificador.embedding(audio)
+    embeddings = []
+    for i in range(N_FRASES_ENROLAMIENTO):
+        anunciar(f"⏺  Decí algo ahora (frase {i + 1} de {N_FRASES_ENROLAMIENTO})...")
+        audio = _grabar_frase_con_limite(config.sensibilidad_voz)
+        embeddings.append(verificador.embedding(audio))
+
+    embedding_promedio = np.mean(embeddings, axis=0)
     ruta = ruta_referencia(config.carpeta_datos)
-    guardar_referencia(ruta, embedding)
-    print(f"Listo: voz de referencia guardada en {ruta}.")
+    guardar_referencia(ruta, embedding_promedio)
+    anunciar(f"Listo: voz de referencia guardada en {ruta}.")
     return ruta
+
+
+LIMITE_SEGUNDOS_POR_FRASE = 20
+
+
+def _grabar_frase_con_limite(sensibilidad: float, limite_segundos: float = LIMITE_SEGUNDOS_POR_FRASE):
+    """Como ``grabar_frase_con_vad``, pero con un límite de tiempo: esa
+    función espera voz SIN límite (correcto para ``Oido`` en uso normal,
+    que debe seguir escuchando indefinidamente) — mal en el enrolamiento,
+    donde si el micrófono está mudo o nadie habla, colgaría el arranque de
+    Jarvis para siempre en vez de fallar con un error claro. Corre la
+    grabación real en un hilo aparte y espera con timeout."""
+    import queue
+    import threading
+
+    from .oido import grabar_frase_con_vad
+
+    resultado: queue.Queue = queue.Queue(maxsize=1)
+
+    def trabajo() -> None:
+        try:
+            resultado.put(("ok", grabar_frase_con_vad(sensibilidad=sensibilidad)))
+        except Exception as error:  # noqa: BLE001 — se re-lanza tal cual del lado del que espera
+            resultado.put(("error", error))
+
+    threading.Thread(target=trabajo, daemon=True).start()
+    try:
+        estado, valor = resultado.get(timeout=limite_segundos)
+    except queue.Empty as error:
+        raise RuntimeError(
+            f"No se detectó tu voz en {limite_segundos}s. ¿Está el micrófono conectado y sin mutear?"
+        ) from error
+    if estado == "error":
+        raise valor
+    return valor

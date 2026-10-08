@@ -258,6 +258,11 @@ def test_modo_completo_por_defecto_usa_voz_y_hud(monkeypatch, tmp_path):
     monkeypatch.setattr("jarvis.voz.habla.crear_habla", lambda _config: _HablaFalsa())
     monkeypatch.setattr("sys.stdin.isatty", lambda: True)
     monkeypatch.setattr("jarvis.conexion_ia._menu_conexion_ia", lambda: "api")
+    # Sin esto, _cargar_reconocimiento_voz (real, no mockeado por nada de lo
+    # anterior) intenta enrolar la voz automáticamente contra el micrófono
+    # real de la máquina que corre el test — con grabar_frase_con_vad
+    # (espera voz real, sin límite de tiempo) eso cuelga el test para siempre.
+    monkeypatch.setattr("jarvis.__main__._cargar_reconocimiento_voz", lambda config, habla=None: (None, None))
 
     assert main([]) == 0
     assert _HudFalso.instancias == 1  # el HUD se abre solo, sin pasar --hud
@@ -275,6 +280,7 @@ def test_usa_ventana_nativa_si_esta_disponible_en_macos(monkeypatch, tmp_path):
     monkeypatch.setattr("jarvis.voz.habla.crear_habla", lambda _config: _HablaFalsa())
     monkeypatch.setattr("sys.stdin.isatty", lambda: True)
     monkeypatch.setattr("jarvis.conexion_ia._menu_conexion_ia", lambda: "api")
+    monkeypatch.setattr("jarvis.__main__._cargar_reconocimiento_voz", lambda config, habla=None: (None, None))
 
     llamadas = []
 
@@ -306,6 +312,7 @@ def test_ventana_nativa_conecta_ocultar_y_mostrar_a_oido(monkeypatch, tmp_path):
     monkeypatch.setattr("jarvis.voz.habla.crear_habla", lambda _config: _HablaFalsa())
     monkeypatch.setattr("sys.stdin.isatty", lambda: True)
     monkeypatch.setattr("jarvis.conexion_ia._menu_conexion_ia", lambda: "api")
+    monkeypatch.setattr("jarvis.__main__._cargar_reconocimiento_voz", lambda config, habla=None: (None, None))
     monkeypatch.setattr(
         "jarvis.hud.ventana_macos.ejecutar_con_ventana_flotante",
         lambda _url, trabajo: trabajo(),
@@ -330,6 +337,7 @@ def test_sin_hud_mantiene_modo_voz(monkeypatch, tmp_path):
     monkeypatch.setattr("jarvis.voz.habla.crear_habla", lambda _config: _HablaFalsa())
     monkeypatch.setattr("sys.stdin.isatty", lambda: True)
     monkeypatch.setattr("jarvis.conexion_ia._menu_conexion_ia", lambda: "api")
+    monkeypatch.setattr("jarvis.__main__._cargar_reconocimiento_voz", lambda config, habla=None: (None, None))
 
     assert main(["--sin-hud"]) == 0
     assert _HudFalso.instancias == 0  # --sin-hud no abre el HUD, pero la voz sigue activa
