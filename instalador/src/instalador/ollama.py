@@ -87,7 +87,7 @@ def instalar_ollama(reportar: Callable[[str], None]) -> None:
 
     reportar("Descargando el script de instalación oficial de Ollama...")
     try:
-        proceso = subprocess.Popen(
+        proceso_cm = subprocess.Popen(
             ["sh", "-c", f"curl -fsSL {URL_INSTALL_SH} | sh"],
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
@@ -97,12 +97,16 @@ def instalar_ollama(reportar: Callable[[str], None]) -> None:
     except OSError as error:
         raise ErrorInstalacionOllama(f"No se pudo iniciar la instalación: {error}") from error
 
-    assert proceso.stdout is not None
-    for linea in proceso.stdout:
-        linea = linea.rstrip()
-        if linea:
-            reportar(linea)
+    # `with` cierra el pipe de stdout solo, incluso si algo entre medio
+    # lanza una excepción — sin esto, cada instalación deja un file
+    # descriptor abierto (confirmado con ResourceWarning en una corrida real).
+    with proceso_cm as proceso:
+        assert proceso.stdout is not None
+        for linea in proceso.stdout:
+            linea = linea.rstrip()
+            if linea:
+                reportar(linea)
+        codigo = proceso.wait()
 
-    codigo = proceso.wait()
     if codigo != 0:
         raise ErrorInstalacionOllama(f"El instalador de Ollama terminó con error (código {codigo}).")
