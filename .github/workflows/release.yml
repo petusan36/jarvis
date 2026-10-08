@@ -1,0 +1,104 @@
+name: Publicar release de Jarvis
+
+# Mismo build que build-app.yml (jarvis.spec, matriz de los 3 runners
+# nativos), pero en vez de subir un artifact efímero de CI (requiere login
+# de GitHub, pensado para que un developer lo baje a mano) publica un
+# GitHub Release real con el bundle de cada SO adjunto — eso es lo que
+# instalador/src/instalador/version.py necesita para poder descargar el
+# bundle real sin que el usuario tenga el repo clonado (ver roadmap punto
+# 5, PR del instalador gráfico).
+#
+# Se dispara con un tag "v*" (ej. v0.1.0) — nunca automático en cada push,
+# a diferencia de build-app.yml: cortar un release es una decisión
+# explícita, no algo que deba pasar solo.
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write  # softprops/action-gh-release necesita esto para crear el Release
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            nombre: macos
+            salida: dist/Jarvis.app
+            zip: jarvis-macos.zip
+          - os: windows-latest
+            nombre: windows
+            salida: dist/jarvis
+            zip: jarvis-windows.zip
+          - os: ubuntu-latest
+            nombre: linux
+            salida: dist/jarvis
+            zip: jarvis-linux.zip
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Dependencias nativas (Linux)
+        if: matrix.nombre == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y espeak-ng portaudio19-dev libsndfile1
+
+      - name: Instalar jarvis con el grupo "build"
+        run: pip install -e ".[build]"
+
+      - name: Construir con PyInstaller
+        run: pyinstaller --noconfirm --clean jarvis.spec
+
+      - name: Verificar que el bundle se generó
+        shell: bash
+        run: |
+          if [ ! -e "${{ matrix.salida }}" ]; then
+            echo "No se generó ${{ matrix.salida }}" >&2
+            exit 1
+          fi
+          du -sh "${{ matrix.salida }}" || true
+
+      - name: Comprimir el bundle (macOS/Linux)
+        if: matrix.nombre != 'windows'
+        shell: bash
+        run: |
+          cd "$(dirname "${{ matrix.salida }}")"
+          zip -r -y "$GITHUB_WORKSPACE/${{ matrix.zip }}" "$(basename "${{ matrix.salida }}")"
+
+      - name: Comprimir el bundle (Windows)
+        if: matrix.nombre == 'windows'
+        shell: pwsh
+        run: |
+          Compress-Archive -Path "${{ matrix.salida }}" -DestinationPath "${{ matrix.zip }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.zip }}
+          path: ${{ matrix.zip }}
+          if-no-files-found: error
+
+  publicar:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Publicar GitHub Release con los 3 bundles adjuntos
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*.zip
+          generate_release_notes: true
