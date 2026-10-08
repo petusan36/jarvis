@@ -173,3 +173,18 @@ def test_contexto_memoria_incluye_los_hechos_encontrados():
     assert "le gusta el rock" in contexto
     assert "vive en Córdoba" in contexto
     assert contexto.startswith("\n\n")
+
+
+def test_contexto_memoria_si_falla_la_consulta_no_crashea_el_turno():
+    """Bug real confirmado en vivo: memoria.contexto_relevante() llama a
+    Ollama (embeddings) vía graphiti_core/openai — si Ollama no responde
+    (openai.APIConnectionError, u otra excepción de red/backend), la
+    excepción no manejada tiraba abajo el hilo entero de la conversación
+    (Exception in thread Thread-24 (_trabajo_y_cerrar), log real). La
+    memoria es de mejor esfuerzo: sin contexto recordado, el turno sigue."""
+
+    class _MemoriaQueFalla(_MemoriaFalsa):
+        def contexto_relevante(self, consulta: str, limite: int = 5) -> list[str]:
+            raise ConnectionError("no se pudo conectar con Ollama")
+
+    assert _contexto_memoria(_MemoriaQueFalla(), "cualquier cosa") == ""
