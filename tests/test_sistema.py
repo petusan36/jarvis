@@ -18,6 +18,16 @@ class EjecutorFalso:
         return subprocess.CompletedProcess(comando, self.codigo, self.salida, "")
 
 
+class EjecutorShellFalso:
+    def __init__(self, stdout="ok", stderr="", codigo=0):
+        self.llamadas = []
+        self.stdout, self.stderr, self.codigo = stdout, stderr, codigo
+
+    def __call__(self, comando, carpeta):
+        self.llamadas.append((comando, carpeta))
+        return subprocess.CompletedProcess(comando, self.codigo, self.stdout, self.stderr)
+
+
 @pytest.fixture
 def casa(tmp_path):
     casa = tmp_path / "casa"
@@ -35,8 +45,10 @@ def casa(tmp_path):
 def sistema(tmp_path, casa):
     h = Herramientas(tmp_path / "datos", sistema=False)
     ejecutor = EjecutorFalso()
-    registrar_sistema(h, carpeta_personal=casa, ejecutar=ejecutor)
+    ejecutor_shell = EjecutorShellFalso()
+    registrar_sistema(h, carpeta_personal=casa, ejecutar=ejecutor, ejecutar_shell=ejecutor_shell)
     h.ejecutor = ejecutor
+    h.ejecutor_shell = ejecutor_shell
     return h
 
 
@@ -166,6 +178,234 @@ def test_cerrar_aplicacion_escapa_comillas(sistema):
 
 
 def test_no_hay_herramientas_de_borrar(tmp_path):
+    """Ninguna herramienta se LLAMA "borrar"/"eliminar"/"mover" — pero
+    ejecutar_comando sí puede hacer eso (es la excepción deliberada: corre
+    cualquier shell, con su propia confirmación en dos pasos). Esta prueba
+    documenta el nombrado, no una garantía de que nada borra nada."""
     nombres = {d["name"] for d in Herramientas(tmp_path).definiciones()}
-    assert {"listar_carpeta", "abrir_aplicacion", "cerrar_aplicacion"} <= nombres
+    assert {"listar_carpeta", "abrir_aplicacion", "cerrar_aplicacion", "ejecutar_comando"} <= nombres
     assert not any(p in n for n in nombres for p in ("borrar", "eliminar", "mover"))
+
+
+# --- escribir_archivo ------------------------------------------------------
+#
+# Decisión explícita del usuario (confirmado probando la app): si él ya
+# pidió la acción con sus palabras, confirmarla de nuevo es fricción
+# redundante — SALVO que sea algo que borre/destruya algo. Para
+# escribir_archivo, "destruye algo" = reemplazar un archivo que YA EXISTE
+# (pierde su contenido anterior). Un archivo nuevo no tiene nada que
+# perder, así que se escribe directo, sin pedir confirmado=true.
+
+def _reemplazar_confirmado(sistema, ruta, contenido):
+    """Para un archivo que YA EXISTE: exige el mismo gate en dos pasos que
+    recordar/crear_habilidad/ejecutar_comando (ver hallazgo de seguridad real)."""
+    sistema.nuevo_turno("escribí ese archivo")
+    sistema.ejecutar("escribir_archivo", {"ruta": ruta, "contenido": contenido, "confirmado": False})
+    sistema.nuevo_turno("sí, dale")
+    return sistema.ejecutar("escribir_archivo", {"ruta": ruta, "contenido": contenido, "confirmado": True})
+
+
+def test_escribir_archivo_nuevo_se_crea_directo_sin_pedir_confirmacion(sistema, casa):
+    """Archivo nuevo: nada que perder, nada que confirmar."""
+    salida, error = sistema.ejecutar("escribir_archivo", {
+        "ruta": "Documents/trabajo/main.py", "contenido": "print('hola')", "confirmado": False,
+    })
+    assert not error
+    assert "pendiente" not in salida.lower()
+    assert (casa / "Documents" / "trabajo" / "main.py").read_text() == "print('hola')"
+
+
+def test_escribir_archivo_existente_sin_confirmar_queda_pendiente_y_no_reemplaza(sistema, casa):
+    (casa / "Documents" / "trabajo" / "x.txt").write_text("original")
+    salida, error = sistema.ejecutar("escribir_archivo", {
+        "ruta": "Documents/trabajo/x.txt", "contenido": "nuevo", "confirmado": False,
+    })
+    assert not error
+    assert "pendiente" in salida.lower() or "confirmación" in salida.lower()
+    assert (casa / "Documents" / "trabajo" / "x.txt").read_text() == "original"
+
+
+def test_escribir_archivo_existente_confirmar_no_permite_cambiar_el_contenido(sistema, casa):
+    """Mismo hallazgo de seguridad que crear_habilidad/ejecutar_comando: la
+    confirmación se ata a la ruta Y un hash del contenido — si cambia el
+    contenido entre el pedido y la confirmación, cuenta como un pedido
+    nuevo, no uno ya aprobado."""
+    (casa / "Documents" / "trabajo" / "x.txt").write_text("original")
+    sistema.ejecutar("escribir_archivo", {
+        "ruta": "Documents/trabajo/x.txt", "contenido": "contenido inocente", "confirmado": False,
+    })
+    sistema.nuevo_turno("sí, dale")
+    salida, error = sistema.ejecutar("escribir_archivo", {
+        "ruta": "Documents/trabajo/x.txt", "contenido": "contenido CAMBIADO", "confirmado": True,
+    })
+    assert not error
+    assert (casa / "Documents" / "trabajo" / "x.txt").read_text() == "original"
+
+
+def test_escribir_archivo_existente_confirmado_lo_reemplaza(sistema, casa):
+    (casa / "Documents" / "trabajo" / "x.txt").write_text("viejo")
+    salida, error = _reemplazar_confirmado(sistema, "Documents/trabajo/x.txt", "nuevo")
+    assert not error
+    assert (casa / "Documents" / "trabajo" / "x.txt").read_text() == "nuevo"
+
+
+def test_escribir_archivo_sin_carpeta_destino_falla(sistema):
+    salida, error = sistema.ejecutar("escribir_archivo", {
+        "ruta": "Documents/no-existe/main.py", "contenido": "x", "confirmado": False,
+    })
+    assert error
+
+
+def test_escribir_archivo_no_escapa_la_carpeta_personal(sistema):
+    salida, error = sistema.ejecutar("escribir_archivo", {
+        "ruta": "../fuera.txt", "contenido": "malicioso", "confirmado": False,
+    })
+    assert error
+
+
+def test_escribir_archivo_requiere_dueño(sistema, casa):
+    sistema.nuevo_turno("escribí esto", es_dueño=False)
+    salida, error = sistema.ejecutar("escribir_archivo", {
+        "ruta": "Documents/trabajo/x.txt", "contenido": "x", "confirmado": False,
+    })
+    assert not error
+    assert "no puedo ejecutar" in salida.lower()
+    assert not (casa / "Documents" / "trabajo" / "x.txt").is_file()
+
+
+def test_escribir_archivo_rechaza_dotfiles(sistema):
+    """Un dotfile (.ssh/authorized_keys, .zshrc, ...) equivale a ejecutar
+    código — hallazgo de seguridad real: antes no había ningún bloqueo."""
+    salida, error = sistema.ejecutar("escribir_archivo", {
+        "ruta": ".zshrc", "contenido": "echo hackeado", "confirmado": False,
+    })
+    assert error
+
+
+def test_escribir_archivo_rechaza_dot_carpetas(sistema):
+    salida, error = sistema.ejecutar("escribir_archivo", {
+        "ruta": ".ssh/authorized_keys", "contenido": "ssh-ed25519 AAAA...", "confirmado": False,
+    })
+    assert error
+
+
+def test_escribir_archivo_rechaza_library(sistema):
+    """Library/LaunchAgents/*.plist se ejecuta solo al iniciar sesión en macOS."""
+    salida, error = sistema.ejecutar("escribir_archivo", {
+        "ruta": "Library/LaunchAgents/evil.plist", "contenido": "<xml/>", "confirmado": False,
+    })
+    assert error
+
+
+def test_escribir_archivo_rechaza_library_sin_importar_mayusculas(sistema):
+    """Hallazgo real: APFS/HFS+ (el filesystem por defecto de macOS) es
+    insensible a mayúsculas — "library" y "Library" son la misma carpeta
+    en disco, aunque "library" == "Library" sea False en Python. El primer
+    intento de este fix comparaba sin casefold y quedaba bypasseable con
+    cualquier variación de mayúsculas."""
+    for variante in ("library/LaunchAgents/evil.plist", "LIBRARY/LaunchAgents/evil.plist"):
+        salida, error = sistema.ejecutar("escribir_archivo", {
+            "ruta": variante, "contenido": "<xml/>", "confirmado": False,
+        })
+        assert error
+
+
+# --- abrir_aplicacion con ruta ----------------------------------------------
+
+def test_abrir_aplicacion_sin_ruta_igual_que_antes(sistema):
+    sistema.ejecutar("abrir_aplicacion", {"nombre": "Safari", "ruta": ""})
+    assert sistema.ejecutor.comandos == [["open", "-a", "Safari"]]
+
+
+def test_abrir_aplicacion_con_ruta_la_pasa_al_comando(sistema, casa):
+    sistema.ejecutar("abrir_aplicacion", {"nombre": "Visual Studio Code", "ruta": "Documents/trabajo"})
+    comando = sistema.ejecutor.comandos[-1]
+    assert comando[:3] == ["open", "-a", "Visual Studio Code"]
+    assert comando[3] == str(casa / "Documents" / "trabajo")
+
+
+def test_abrir_aplicacion_con_ruta_fuera_de_la_carpeta_personal_falla(sistema):
+    salida, error = sistema.ejecutar("abrir_aplicacion", {"nombre": "Safari", "ruta": "../fuera.txt"})
+    assert error
+
+
+# --- ejecutar_comando -------------------------------------------------------
+#
+# Decisión explícita del usuario (confirmado probando la app): si él ya
+# pidió la acción con sus palabras, confirmarla de nuevo es fricción
+# redundante — SALVO que el comando parezca borrar/destruir algo
+# (_comando_es_destructivo: rm, rmdir, del, drop table, etc. — heurística
+# de palabras clave, nunca exhaustiva para un shell libre, ver el
+# comentario junto a esa función en sistema.py).
+
+def test_ejecutar_comando_no_destructivo_corre_directo_sin_pedir_confirmacion(sistema, casa):
+    salida, error = sistema.ejecutar("ejecutar_comando", {"comando": "echo hola", "confirmado": False})
+    assert not error
+    assert sistema.ejecutor_shell.llamadas == [("echo hola", casa)]
+
+
+def test_ejecutar_comando_destructivo_sin_confirmar_queda_pendiente_y_no_corre(sistema):
+    salida, error = sistema.ejecutar("ejecutar_comando", {"comando": "rm -rf build/", "confirmado": False})
+    assert not error
+    assert "confirmaci" in salida.lower()
+    assert sistema.ejecutor_shell.llamadas == []
+
+
+def test_ejecutar_comando_destructivo_confirmado_en_el_mismo_turno_no_corre(sistema):
+    sistema.ejecutar("ejecutar_comando", {"comando": "rm -rf build/", "confirmado": False})
+    sistema.ejecutar("ejecutar_comando", {"comando": "rm -rf build/", "confirmado": True})
+    assert sistema.ejecutor_shell.llamadas == []
+
+
+def test_ejecutar_comando_destructivo_confirmar_no_permite_cambiar_el_comando(sistema):
+    """Mismo hallazgo de seguridad que crear_habilidad: la confirmación se
+    ata al comando exacto, no solo a que "algo" se confirmó — si cambia el
+    comando entre el pedido y la confirmación, cuenta como un pedido nuevo."""
+    sistema.ejecutar("ejecutar_comando", {"comando": "rm -rf build/", "confirmado": False})
+    sistema.nuevo_turno("sí, dale")
+    salida, error = sistema.ejecutar("ejecutar_comando", {"comando": "rm -rf /", "confirmado": True})
+    assert not error
+    assert "confirmaci" in salida.lower()
+    assert sistema.ejecutor_shell.llamadas == []
+
+
+def test_ejecutar_comando_destructivo_confirmado_en_turno_siguiente_corre(sistema, casa):
+    sistema.ejecutor_shell.stdout = "listo"
+    sistema.ejecutar("ejecutar_comando", {"comando": "rm -rf build/", "confirmado": False})
+    sistema.nuevo_turno("sí, dale")
+
+    salida, error = sistema.ejecutar("ejecutar_comando", {"comando": "rm -rf build/", "confirmado": True})
+
+    assert not error
+    assert "listo" in salida
+    assert sistema.ejecutor_shell.llamadas == [("rm -rf build/", casa)]
+
+
+@pytest.mark.parametrize("comando", [
+    "rm archivo.txt", "rm -rf carpeta/", "rmdir carpeta_vacia", "del archivo.txt",
+    "unlink archivo.txt", "shred -u secreto.txt", "DROP TABLE usuarios", "drop database x",
+])
+def test_comando_es_destructivo_detecta_patrones_conocidos(comando):
+    from jarvis.sistema import _comando_es_destructivo
+    assert _comando_es_destructivo(comando) is True
+
+
+@pytest.mark.parametrize("comando", ["echo hola", "npm install", "git status", "ls -la", "cat archivo.txt"])
+def test_comando_es_destructivo_no_marca_comandos_normales(comando):
+    from jarvis.sistema import _comando_es_destructivo
+    assert _comando_es_destructivo(comando) is False
+
+
+def test_ejecutar_comando_requiere_dueño(sistema):
+    """requiere_dueño se aplica siempre, sin importar si el comando es
+    destructivo o no — es identidad (quién habla), no fricción de
+    confirmación, y no se negocia con la decisión de reducir fricción."""
+    sistema.nuevo_turno("corré esto", es_dueño=False)
+    salida, error = sistema.ejecutar("ejecutar_comando", {"comando": "echo hola", "confirmado": False})
+    assert not error
+    assert "no puedo ejecutar" in salida.lower()
+    assert sistema.ejecutor_shell.llamadas == []
+
+
+def test_ejecutar_comando_vacio_falla(sistema):
+    assert sistema.ejecutar("ejecutar_comando", {"comando": "   ", "confirmado": False})[1] is True

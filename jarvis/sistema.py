@@ -1,16 +1,32 @@
-"""Herramientas para manejar el equipo: carpetas, archivos y aplicaciones.
+"""Herramientas para manejar el equipo: carpetas, archivos, aplicaciones y
+comandos de shell.
 
 Pensadas para macOS (usan ``open`` y AppleScript). Por seguridad:
 
-- Solo trabajan dentro de la carpeta personal del usuario.
-- No hay ninguna herramienta para borrar ni mover archivos.
-- Cerrar una aplicación exige que el usuario lo confirme en un mensaje
-  posterior: la primera llamada solo deja la petición pendiente.
+- Solo trabajan dentro de la carpeta personal del usuario (archivos/carpetas;
+  ``ejecutar_comando`` es la excepción deliberada — ver su propio docstring).
+- ``escribir_archivo`` rechaza dotfiles/dot-carpetas (.ssh, .zshrc...) y todo
+  lo que esté bajo ``Library`` — equivale a ejecutar código (una clave SSH,
+  un LaunchAgent) sin pasar por ``ejecutar_comando`` ni su confirmación.
+- Cerrar una aplicación, escribir un archivo, y ejecutar un comando de
+  shell, exigen que el usuario lo confirme en un mensaje posterior: la
+  primera llamada solo deja la petición pendiente.
+
+Límite conocido, no resuelto acá: la confirmación de estas tres la "ve" el
+usuario a través de lo que Jarvis le dice/muestra, que decide el modelo —
+no hay (todavía) un diálogo nativo fuera del control del modelo que
+garantice que lo mostrado es exactamente lo que se va a ejecutar/escribir.
+Mismo límite que ya tenían ``recordar``/``cerrar_aplicacion`` desde antes;
+se vuelve más relevante con ``ejecutar_comando`` por el alcance (cualquier
+comando, no limitado a la carpeta personal). Un diálogo nativo (fuera del
+modelo) queda como mejora futura, no como parche de esta tarea.
 """
 
 from __future__ import annotations
 
+import hashlib
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -27,6 +43,34 @@ MAX_TEXTO_PDF = 20000  # caracteres; de más, se trunca
 CARPETAS_IGNORADAS = {"Library", "node_modules", ".Trash", "__pycache__", ".git", ".venv"}
 # Abrir estos archivos ejecutaría código, así que no se permite.
 EXTENSIONES_EJECUTABLES = {".command", ".sh", ".tool", ".terminal", ".scpt", ".workflow"}
+# escribir_archivo no puede tocar nada bajo estas carpetas, ni ningún
+# dotfile/dot-carpeta (.ssh, .zshrc, .bash_profile, .config...): escribir ahí
+# equivale a ejecutar código (un LaunchAgent, una rc de shell, una clave SSH),
+# el mismo nivel de riesgo que ejecutar_comando pero sin su confirmación.
+# casefold, no el nombre tal cual: el filesystem de macOS por defecto
+# (APFS/HFS+) es insensible a mayúsculas — "library" y "Library" son la
+# MISMA carpeta en disco, aunque "library" == "Library" sea False en Python.
+CARPETAS_PROHIBIDAS_ESCRITURA = {"library"}
+
+# ejecutar_comando pide confirmación SOLO si el comando parece borrar o
+# destruir algo — si el usuario ya pidió la acción con sus propias
+# palabras, confirmarla de nuevo es fricción redundante (decisión
+# explícita del usuario). Límite real, no resuelto: un shell es libre, así
+# que esto es una heurística de palabras clave, nunca exhaustiva — un
+# comando que borre sin usar ninguna de estas palabras (p. ej. un script
+# de Python con os.remove) corre SIN confirmar. No hay forma de detectar
+# "esto borra algo" con certeza sin interpretar semánticamente cualquier
+# comando posible.
+_PATRON_COMANDO_DESTRUCTIVO = re.compile(
+    r"\b(rm|rmdir|del|erase|unlink|shred|mkfs|dd)\b"
+    r"|remove-item|drop\s+table|drop\s+database|truncate\s+table",
+    re.IGNORECASE,
+)
+
+
+def _comando_es_destructivo(comando: str) -> bool:
+    return bool(_PATRON_COMANDO_DESTRUCTIVO.search(comando))
+
 
 CARPETAS_EN_ESPANOL = {
     "escritorio": "Desktop", "documentos": "Documents", "descargas": "Downloads",
@@ -35,15 +79,31 @@ CARPETAS_EN_ESPANOL = {
 }
 
 Ejecutor = Callable[[list[str]], subprocess.CompletedProcess]
+# Firma distinta de Ejecutor (comando como string, no lista): ejecutar_comando
+# corre lo que sea que pida el usuario, shell=True, no una lista fija de
+# argumentos — necesita su propio seam para no ejecutar nada real en tests.
+EjecutorShell = Callable[[str, Path], subprocess.CompletedProcess]
 
 
 def _ejecutar(comando: list[str]) -> subprocess.CompletedProcess:
     return subprocess.run(comando, capture_output=True, text=True, timeout=20)
 
 
+def _ejecutar_shell(comando: str, carpeta: Path) -> subprocess.CompletedProcess:
+    return subprocess.run(comando, shell=True, cwd=str(carpeta), capture_output=True, text=True, timeout=120)
+
+
 def registrar_sistema(h: "Herramientas", carpeta_personal: Path | None = None,
-                      ejecutar: Ejecutor = _ejecutar) -> None:
+                      ejecutar: Ejecutor = _ejecutar, ejecutar_shell: EjecutorShell = _ejecutar_shell) -> None:
     raiz = (carpeta_personal or Path.home()).resolve()
+
+    def rechazar_ruta_sensible(destino: Path) -> None:
+        partes = destino.relative_to(raiz).parts
+        if any(p.startswith(".") for p in partes) or (partes and partes[0].casefold() in CARPETAS_PROHIBIDAS_ESCRITURA):
+            raise PermissionError(
+                "por seguridad no escribo ahí: ni dotfiles/dot-carpetas (.ssh, .zshrc, ...) "
+                "ni dentro de Library — equivale a ejecutar código sin tu confirmación real"
+            )
 
     def resolver(ruta: str) -> Path:
         """Convierte lo que diga el usuario en una ruta dentro de su carpeta personal."""
@@ -60,6 +120,24 @@ def registrar_sistema(h: "Herramientas", carpeta_personal: Path | None = None,
             raise PermissionError("solo puedo acceder a carpetas dentro de tu carpeta personal")
         if not destino.exists():
             raise FileNotFoundError(f"no existe {_mostrar(destino)}")
+        return destino
+
+    def resolver_para_escribir(ruta: str) -> Path:
+        """Como ``resolver``, pero para un archivo que se va a CREAR: no
+        exige que ya exista (al revés, normalmente no debería). Misma
+        restricción de no salir de la carpeta personal."""
+        ruta = ruta.strip()
+        if not ruta or ruta in ("~", "/"):
+            raise PermissionError("decime un archivo, no la carpeta personal entera")
+        if ruta.startswith("~/"):
+            ruta = ruta[2:]
+        partes = Path(ruta).parts
+        if partes and not (raiz / partes[0]).exists():
+            primera = CARPETAS_EN_ESPANOL.get(partes[0].lower(), partes[0])
+            ruta = str(Path(primera, *partes[1:]))
+        destino = (raiz / ruta).resolve()
+        if destino == raiz or raiz not in destino.parents:
+            raise PermissionError("solo puedo escribir dentro de tu carpeta personal")
         return destino
 
     def _mostrar(ruta: Path) -> str:
@@ -161,13 +239,129 @@ def registrar_sistema(h: "Herramientas", carpeta_personal: Path | None = None,
         "abrir_aplicacion",
         "Abre (o trae al frente) una aplicación del equipo por su nombre, por ejemplo "
         "'Safari', 'Spotify' o 'Visual Studio Code'. Si no la encuentra, prueba con su "
-        "nombre en inglés (por ejemplo 'Notes' en lugar de 'Notas').",
-        {"nombre": {"type": "string", "description": "Nombre de la aplicación."}},
+        "nombre en inglés (por ejemplo 'Notes' en lugar de 'Notas'). Si además te dan una "
+        "carpeta o archivo (p. ej. 'abrí VS Code en esta carpeta'), pasalo en 'ruta' — "
+        "relativa a la carpeta personal del usuario, igual que en las otras herramientas.",
+        {
+            "nombre": {"type": "string", "description": "Nombre de la aplicación."},
+            "ruta": {
+                "type": "string",
+                "description": "Carpeta o archivo a abrir con esa aplicación, si corresponde. Vacío si no hay ninguno.",
+            },
+        },
         requiere_dueño=True,
     )
-    def abrir_aplicacion(nombre: str) -> str:
-        comprobar(ejecutar(["open", "-a", nombre.strip()]), f"abrir {nombre}")
-        return f"{nombre} abierta."
+    def abrir_aplicacion(nombre: str, ruta: str = "") -> str:
+        if not ruta.strip():
+            comprobar(ejecutar(["open", "-a", nombre.strip()]), f"abrir {nombre}")
+            return f"{nombre} abierta."
+        destino = resolver(ruta)
+        comprobar(ejecutar(["open", "-a", nombre.strip(), str(destino)]),
+                  f"abrir {_mostrar(destino)} con {nombre}")
+        return f"{nombre} abierta en {_mostrar(destino)}."
+
+    @h.registrar(
+        "escribir_archivo",
+        "Crea un archivo nuevo (o reemplaza uno existente) dentro de la carpeta personal "
+        "del usuario, con el contenido que le pases — por ejemplo, un archivo de código al "
+        "armar un proyecto nuevo. La carpeta de destino tiene que existir: si no, creala "
+        "primero (p. ej. con ejecutar_comando: 'mkdir -p ...'). Si el archivo YA EXISTE, "
+        "reemplazarlo destruye su contenido anterior: llamala primero con confirmado=false "
+        "y pedile aprobación al usuario describiendo la ACCIÓN en términos simples (qué "
+        "archivo y para qué, no la ruta exacta ni el contenido línea por línea — decirlos "
+        "en voz alta es tedioso para quien escucha; solo si te los pide, decíselos), y "
+        "volvé a llamarla con confirmado=true solo si confirma. Si el archivo es NUEVO, no "
+        "hace falta nada de esto: se crea directo.",
+        {
+            "ruta": {
+                "type": "string",
+                "description": "Dónde crear el archivo, p. ej. 'Documents/mi-app/main.py'.",
+            },
+            "contenido": {"type": "string", "description": "Contenido completo del archivo."},
+            "confirmado": {
+                "type": "boolean",
+                "description": "true solo si el usuario ya aprobó la acción (describiste qué vas a crear, no necesariamente la ruta/contenido exactos).",
+            },
+        },
+        requiere_dueño=True,
+    )
+    def escribir_archivo(ruta: str, contenido: str, confirmado: bool) -> str:
+        destino = resolver_para_escribir(ruta)
+        rechazar_ruta_sensible(destino)
+        if not destino.parent.is_dir():
+            raise FileNotFoundError(f"la carpeta {_mostrar(destino.parent)} no existe todavía")
+        # Solo pide confirmación si YA EXISTE un archivo ahí: reemplazarlo
+        # destruye su contenido anterior. Un archivo nuevo no tiene nada
+        # que perder — si el usuario ya pidió la acción con sus propias
+        # palabras, confirmarla de nuevo es fricción redundante (decisión
+        # explícita del usuario).
+        if destino.is_file():
+            # La clave incluye la ruta Y un hash del contenido — igual que
+            # recordar ata hecho+valor, y ejecutar_comando el comando
+            # exacto: sin esto, se podía pedir confirmación mostrando un
+            # contenido y escribir otro distinto en la llamada confirmada
+            # (mismo hallazgo de seguridad ya corregido en crear_habilidad,
+            # PR #24).
+            resumen_contenido = hashlib.sha256(contenido.encode("utf-8")).hexdigest()
+            clave = ("escribir_archivo", str(destino), resumen_contenido)
+            if not h.autorizacion.pedir(clave, h.turno, confirmado, h.ultimo_mensaje_usuario):
+                return (f"{_mostrar(destino)} ya existe y reemplazarlo destruye su "
+                        "contenido anterior, así que necesito confirmación. Describile al "
+                        "usuario la acción (no necesariamente la ruta/contenido exactos, "
+                        "salvo que te los pida) y esperá su respuesta antes de llamar de "
+                        "nuevo con confirmado=true.")
+        destino.write_text(contenido, encoding="utf-8")
+        return f"Escrito {_mostrar(destino)} ({len(contenido)} caracteres)."
+
+    @h.registrar(
+        "ejecutar_comando",
+        "Ejecuta un comando de shell en el equipo del usuario — instalar dependencias, "
+        "correr un script, inicializar un proyecto (git init, npm install, etc.). Es la "
+        "herramienta de mayor riesgo de todas: puede modificar o borrar cualquier cosa a la "
+        "que tu usuario tenga acceso, no solo su carpeta personal. Llamala primero con "
+        "confirmado=false: eso deja el comando pendiente. Pedile aprobación al usuario "
+        "describiendo la ACCIÓN en términos simples (p. ej. 'voy a instalar las "
+        "dependencias del proyecto', no 'voy a correr npm install') — el comando en sí es "
+        "un detalle de implementación de la acción, decirlo en voz alta es tedioso para "
+        "quien escucha. Solo si el usuario te pide el comando exacto, decíselo. Solo si en "
+        "su siguiente mensaje confirma la acción, volvé a llamarla con confirmado=true. Te "
+        "devuelve la salida real (stdout/stderr/código de salida) para que sepas si "
+        "funcionó.",
+        {
+            "comando": {"type": "string", "description": "El comando completo a ejecutar, p. ej. 'npm install'."},
+            "confirmado": {
+                "type": "boolean",
+                "description": "true solo si el usuario ya aprobó la acción (describiste qué vas a hacer, no necesariamente el comando exacto).",
+            },
+        },
+        requiere_dueño=True,
+    )
+    def ejecutar_comando(comando: str, confirmado: bool) -> str:
+        comando = comando.strip()
+        if not comando:
+            raise ValueError("decime qué comando correr")
+        # Solo pide confirmación si el comando parece borrar/destruir algo:
+        # si el usuario ya pidió la acción con sus propias palabras,
+        # confirmarla de nuevo es fricción redundante (decisión explícita
+        # del usuario) — salvo que sea algo destructivo, donde el costo de
+        # un error es mucho más alto.
+        if _comando_es_destructivo(comando):
+            clave = ("ejecutar_comando", comando)
+            if not h.autorizacion.pedir(clave, h.turno, confirmado, h.ultimo_mensaje_usuario):
+                return (f"Esto borra o destruye algo, así que necesito confirmación. "
+                        "Describile al usuario la acción (no necesariamente el comando "
+                        "exacto, salvo que te lo pida) y esperá su respuesta antes de "
+                        "llamar de nuevo con confirmado=true.")
+        try:
+            resultado = ejecutar_shell(comando, raiz)
+        except subprocess.TimeoutExpired:
+            return "El comando no terminó en 120 segundos; se interrumpió."
+        salida = (
+            f"Código de salida: {resultado.returncode}\n"
+            f"stdout:\n{resultado.stdout.strip() or '(vacío)'}\n"
+            f"stderr:\n{resultado.stderr.strip() or '(vacío)'}"
+        )
+        return salida
 
     @h.registrar(
         "aplicaciones_abiertas",

@@ -704,6 +704,54 @@ def test_configurar_codex_sin_cli_instalada_falla_con_mensaje_claro(monkeypatch)
         _configurar_codex()
 
 
+def test_es_modelo_ollama_detecta_tags_con_dos_puntos():
+    from jarvis.conexion_ia import _es_modelo_ollama
+
+    assert _es_modelo_ollama("qwen3:8b") is True
+    assert _es_modelo_ollama("llama3.1:8b") is True
+    assert _es_modelo_ollama("claude-opus-5-5") is False
+    assert _es_modelo_ollama("gpt-5-codex") is False
+
+
+def test_crear_cerebro_codex_ignora_un_modelo_de_ollama_guardado(monkeypatch, tmp_path):
+    """Bug real confirmado en vivo: JARVIS_MODELO quedó en "qwen3:8b" de una
+    sesión anterior con Ollama (motor=api). Al elegir Codex después, ese
+    valor se mandaba tal cual — Codex devolvía 400 ("'qwen3:8b' no
+    soportado"). _crear_cerebro tiene que detectar que es un tag de Ollama
+    (no un nombre válido para Codex) y usar el default de Codex en vez de
+    asumir que, por no ser el default genérico, el usuario lo eligió a
+    propósito PARA Codex."""
+    from jarvis.conexion_ia import MODELO_CODEX_POR_DEFECTO, _crear_cerebro
+
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.setattr("jarvis.conexion_ia._menu_conexion_ia", lambda: "codex")
+    monkeypatch.setattr("jarvis.conexion_ia.AdaptadorCodexResponses", lambda: object())
+    monkeypatch.setenv("JARVIS_CARPETA_DATOS", str(tmp_path))
+    monkeypatch.setenv("JARVIS_MODELO", "qwen3:8b")  # guardado de una sesión anterior con Ollama
+
+    cerebro = _crear_cerebro(Config(carpeta_datos=tmp_path))
+
+    assert cerebro.config.modelo == MODELO_CODEX_POR_DEFECTO
+
+
+def test_crear_cerebro_suscripcion_ignora_un_modelo_de_ollama_guardado(monkeypatch, tmp_path):
+    """Mismo bug, motor=suscripcion: el Claude Agent SDK recibiría
+    "qwen3:8b" como nombre de modelo de Claude si no se detecta y
+    descarta."""
+    pytest.importorskip("claude_agent_sdk")
+    from jarvis.conexion_ia import _crear_cerebro
+
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.setattr("jarvis.conexion_ia._menu_conexion_ia", lambda: "suscripcion")
+    monkeypatch.setenv("JARVIS_CARPETA_DATOS", str(tmp_path))
+    monkeypatch.setenv("JARVIS_MODELO", "qwen3:8b")
+
+    cerebro = _crear_cerebro(Config(carpeta_datos=tmp_path))
+
+    assert cerebro.config.modelo == Config().modelo
+    cerebro.cerrar()
+
+
 def test_menu_conexion_opcion_local_lista_y_persiste_modelo(monkeypatch, tmp_path):
     from jarvis.conexion_ia import _menu_conexion_ia
 

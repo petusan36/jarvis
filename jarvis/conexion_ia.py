@@ -102,20 +102,43 @@ def _crear_cerebro(config: Config, forzar_menu: bool = False):
         memoria=_crear_memoria(config) if config.memoria_habilitada else None,
         config=config,
     )
+    # config.modelo/JARVIS_MODELO es un solo campo compartido entre los tres
+    # motores, pero cada uno tiene su propio espacio de nombres de modelos
+    # (tags de Ollama como "qwen3:8b", nombres de Claude, nombres de Codex)
+    # — si quedó fijado para Ollama (motor=api) y después se elige
+    # suscripción o Codex, NO sirve para el motor nuevo. Confirmado en vivo:
+    # Codex devolvía 400 ("'qwen3:8b' no soportado") porque _crear_cerebro
+    # mandaba ese valor tal cual. _es_modelo_ollama (heurística: los tags de
+    # Ollama llevan ":", los de Claude/Codex no) decide si hay que ignorarlo
+    # y usar el default del motor nuevo en vez de "¿sigue en el default
+    # genérico?" (que no detecta este caso: un modelo de Ollama elegido a
+    # propósito no es el default genérico, pero tampoco sirve acá).
     if motor in ("suscripcion", "suscripción"):
         from .cerebro_suscripcion import CerebroSuscripcion
         print("(usando tu suscripción de Claude a través de Claude Code)")
+        if _es_modelo_ollama(config.modelo):
+            config.modelo = Config().modelo
         return CerebroSuscripcion(config, herramientas)
     if motor == "codex":
         print("(usando tu sesión de Codex)")
         adaptador = AdaptadorCodexResponses()  # valida la sesión (RuntimeError si no hay o venció)
-        if config.modelo == Config().modelo:  # nadie fijó JARVIS_MODELO a mano
+        if config.modelo == Config().modelo or _es_modelo_ollama(config.modelo):
             config.modelo = MODELO_CODEX_POR_DEFECTO
         return Cerebro(config, herramientas, adaptador)
     if motor != "api":
         raise RuntimeError(f"JARVIS_MOTOR no válido: {config.motor} (usa api, suscripcion, codex o auto)")
     adaptador = _crear_adaptador(config)
     return Cerebro(config, herramientas, adaptador)
+
+
+def _es_modelo_ollama(modelo: str) -> bool:
+    """¿Este valor de config.modelo es un tag de Ollama ("qwen3:8b",
+    "llama3.1:8b"...), no un nombre de modelo de Claude/Codex? Los tags de
+    Ollama siempre llevan ":" (repo:tag); los nombres de Claude/Codex,
+    nunca — heurística simple, pero alcanza para detectar el caso real:
+    un modelo elegido para motor=api/proveedor=ollama que quedó guardado
+    en JARVIS_MODELO y no sirve si después se elige otro motor."""
+    return ":" in modelo
 
 
 def _crear_adaptador(config: Config):
