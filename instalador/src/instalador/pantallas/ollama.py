@@ -1,17 +1,16 @@
 """Pantalla 2 del wizard: Ollama es requisito, no opcional — si no está
 instalado, no hay forma de avanzar desde acá salvo instalarlo (o cerrar el
-instalador). Esta pantalla solo detecta; el botón que dispara la
-instalación real por sistema operativo es el siguiente incremento (hace
-falta verificar el mecanismo real de instalación por SO antes de
-escribirlo — no se va a inventar un comando sin confirmarlo)."""
+instalador)."""
 
 from __future__ import annotations
+
+import threading
 
 import toga
 from toga.style import Pack
 from toga.style.pack import COLUMN, ROW
 
-from ..ollama import ollama_instalado
+from ..ollama import ErrorInstalacionOllama, instalar_automatico_disponible, instalar_ollama, ollama_instalado
 
 
 class PantallaOllama:
@@ -66,14 +65,44 @@ class PantallaOllama:
         self._actualizar_estado()
 
     def _instalar(self, widget) -> None:
-        # Siguiente incremento: disparar el instalador real de Ollama por
-        # sistema operativo. Por ahora solo re-verifica, para no inventar
-        # un mecanismo de instalación sin confirmarlo contra lo que Ollama
-        # realmente distribuye en cada SO.
-        self._estado_label.text = (
-            "Instalación automática todavía no implementada: instalá Ollama manualmente "
-            "desde https://ollama.com y volvé a verificar."
-        )
+        if not instalar_automatico_disponible():
+            self._estado_label.text = (
+                "La instalación automática no está disponible en este sistema operativo "
+                "todavía. Instalá Ollama manualmente desde https://ollama.com y volvé a "
+                "verificar."
+            )
+            return
+
+        self._boton_instalar.enabled = False
+        self._boton_verificar.enabled = False
+        self._estado_label.text = "Instalando Ollama..."
+        bucle = toga.App.app.loop
+
+        def reportar(linea: str) -> None:
+            bucle.call_soon_threadsafe(self._actualizar_progreso, linea)
+
+        def trabajo() -> None:
+            try:
+                instalar_ollama(reportar=reportar)
+            except ErrorInstalacionOllama as error:
+                bucle.call_soon_threadsafe(self._instalacion_fallo, str(error))
+            else:
+                bucle.call_soon_threadsafe(self._instalacion_lista)
+
+        threading.Thread(target=trabajo, daemon=True).start()
+
+    def _actualizar_progreso(self, linea: str) -> None:
+        self._estado_label.text = linea
+
+    def _instalacion_lista(self) -> None:
+        self._boton_instalar.enabled = True
+        self._boton_verificar.enabled = True
+        self._actualizar_estado()
+
+    def _instalacion_fallo(self, mensaje: str) -> None:
+        self._boton_instalar.enabled = True
+        self._boton_verificar.enabled = True
+        self._estado_label.text = f"La instalación falló: {mensaje}"
 
     def _continuar(self, widget) -> None:
         self._al_continuar()

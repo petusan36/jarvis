@@ -32,6 +32,42 @@ def test_continuar_dispara_callback_solo_si_hay_ollama():
     assert llamado["listo"] is True
 
 
+def test_instalar_en_so_sin_soporte_no_arranca_hilo_ni_cambia_botones():
+    with patch.object(modulo, "ollama_instalado", return_value=False):
+        p = modulo.PantallaOllama(al_continuar=lambda: None)
+    with patch.object(modulo, "instalar_automatico_disponible", return_value=False):
+        p._instalar(None)
+    assert p._boton_instalar.enabled is True
+    assert "no está disponible" in p._estado_label.text
+
+
+def test_instalacion_lista_reactiva_botones_y_reconsulta_estado():
+    with patch.object(modulo, "ollama_instalado", return_value=False):
+        p = modulo.PantallaOllama(al_continuar=lambda: None)
+    p._boton_instalar.enabled = False
+    p._boton_verificar.enabled = False
+    with patch.object(modulo, "ollama_instalado", return_value=True):
+        p._instalacion_lista()
+    assert p._boton_instalar.enabled is True
+    assert p._boton_continuar in p._fila_botones.children
+
+
+def test_instalacion_fallo_muestra_el_error_y_reactiva_botones():
+    with patch.object(modulo, "ollama_instalado", return_value=False):
+        p = modulo.PantallaOllama(al_continuar=lambda: None)
+    p._boton_instalar.enabled = False
+    p._instalacion_fallo("boom")
+    assert p._boton_instalar.enabled is True
+    assert "boom" in p._estado_label.text
+
+
+def test_actualizar_progreso_refleja_la_linea_recibida():
+    with patch.object(modulo, "ollama_instalado", return_value=False):
+        p = modulo.PantallaOllama(al_continuar=lambda: None)
+    p._actualizar_progreso("Descargando Ollama...")
+    assert p._estado_label.text == "Descargando Ollama..."
+
+
 def test_verificar_de_nuevo_refleja_un_cambio_de_estado():
     """Simula instalar Ollama mientras el instalador sigue abierto y
     apretar "Verificar de nuevo": el estado tiene que poder pasar de
