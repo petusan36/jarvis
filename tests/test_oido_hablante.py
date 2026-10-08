@@ -51,3 +51,17 @@ def test_si_el_verificador_falla_falla_cerrado_no_abierto():
     sería una forma trivial de saltarse el gate de requiere_dueño."""
     oido = _oido_sin_init(verificador=_VerificadorQueFalla(), referencia_voz=object())
     assert oido._coincide_con_dueño(audio=object()) is False
+
+
+def test_voz_que_no_coincide_queda_registrada(capsys):
+    """Sin esto, un reporte de "Jarvis no me reconoció" no se puede auditar
+    después: nada deja rastro de si el gate corrió y qué decidió."""
+    oido = _oido_sin_init(verificador=_VerificadorFalso(False), referencia_voz=object())
+    oido._coincide_con_dueño(audio=object())
+    assert "no coincide con el dueño" in capsys.readouterr().out
+
+
+def test_voz_que_sí_coincide_no_genera_ruido_en_la_salida(capsys):
+    oido = _oido_sin_init(verificador=_VerificadorFalso(True), referencia_voz=object())
+    oido._coincide_con_dueño(audio=object())
+    assert capsys.readouterr().out == ""

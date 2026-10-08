@@ -30,9 +30,17 @@ const NOMBRES = { reposo: "EN ESPERA", escuchando: "ESCUCHANDO", pensando: "PROC
 const PERFILES = {
   reposo:     { giro: 0.15, brillo: 0.55, pulso: 0.04, barras: 0.0, orbitas: 0.0, tono: [79, 216, 255] },
   escuchando: { giro: 0.35, brillo: 0.85, pulso: 0.02, barras: 1.0, orbitas: 0.0, tono: [79, 216, 255] },
-  pensando:   { giro: 1.60, brillo: 0.90, pulso: 0.06, barras: 0.0, orbitas: 1.0, tono: [255, 196, 87] },
+  pensando:   { giro: 0.70, brillo: 0.90, pulso: 0.06, barras: 0.0, orbitas: 1.0, tono: [255, 196, 87] },
   hablando:   { giro: 0.50, brillo: 1.00, pulso: 0.00, barras: 0.6, orbitas: 0.0, tono: [120, 230, 255] },
 };
+
+// Paleta fija de la nebulosa ("El Ojo de Dios" / Southern Ring, JWST):
+// anillo de polvo ámbar/óxido por fuera, núcleo azul-blanco frío por
+// dentro. Ninguno de los dos cambia con el estado — solo las estrellas
+// (la central y las del fondo, ver más abajo) usan el color de PERFILES.
+const TONO_ANILLO_ORO = [255, 196, 120];
+const TONO_ANILLO_BRASA = [120, 56, 28];
+const TONO_NUCLEO_FRIO = [150, 205, 255];
 
 let estado = "reposo";
 const actual = { ...PERFILES.reposo, tono: [...PERFILES.reposo.tono] };
@@ -84,32 +92,45 @@ addEventListener("resize", ajustarTamano);
 
 const mezclar = (a, b, f) => a + (b - a) * f;
 const color = (alfa) => `rgba(${actual.tono.map(Math.round).join(",")},${alfa})`;
+// Interpola entre el oro del borde interior del anillo y la brasa de su
+// borde exterior según qué tan afuera esté el jirón — así el anillo de
+// polvo se ve como una gradiente continua, no un solo color plano.
+const colorAnillo = (f, alfa) => {
+  const c = [0, 1, 2].map((i) => mezclar(TONO_ANILLO_ORO[i], TONO_ANILLO_BRASA[i], f));
+  return `rgba(${c.map(Math.round).join(",")},${alfa})`;
+};
+const colorNucleoFrio = (alfa) => `rgba(${TONO_NUCLEO_FRIO.join(",")},${alfa})`;
 
-function arco(radio, inicio, largo, grosor, alfa) {
-  ctx.beginPath();
-  ctx.arc(0, 0, radio, inicio, inicio + largo);
-  ctx.lineWidth = grosor;
-  ctx.strokeStyle = color(alfa);
-  ctx.stroke();
-}
+// Jirones de polvo: forman el anillo grueso de la nebulosa (banda entre
+// 0,5 y 0,95 del radio, no un disco completo). "giro"/"orbitas" del perfil
+// activo deciden qué tan rápido y caótico es el remolino; no hay dos
+// jirones con la misma órbita ni fase, así que el anillo nunca se repite
+// de forma visible aunque el estado se mantenga fijo un rato.
+const N_JIRONES = 30;
+const jirones = Array.from({ length: N_JIRONES }, (_, i) => ({
+  radioBase: 0.5 + Math.random() * 0.45,
+  anguloBase: Math.random() * Math.PI * 2,
+  velocidad: 0.25 + Math.random() * 0.75,
+  fase: Math.random() * Math.PI * 2,
+  ondulacion: 0.08 + Math.random() * 0.14,
+  tamano: 0.12 + Math.random() * 0.20,
+  parpadeo: 0.6 + Math.random() * 1.8,
+  sentido: i % 2 === 0 ? 1 : -1,
+}));
 
-function anilloSegmentado(radio, segmentos, hueco, grosor, giro, alfa) {
-  const paso = (Math.PI * 2) / segmentos;
-  for (let i = 0; i < segmentos; i++) arco(radio, giro + i * paso, paso - hueco, grosor, alfa);
-}
-
-function marcas(radio, cantidad, largo, giro, alfa) {
-  ctx.beginPath();
-  for (let i = 0; i < cantidad; i++) {
-    const a = giro + (i / cantidad) * Math.PI * 2;
-    const l = i % 5 === 0 ? largo * 2 : largo;
-    ctx.moveTo(Math.cos(a) * radio, Math.sin(a) * radio);
-    ctx.lineTo(Math.cos(a) * (radio + l), Math.sin(a) * (radio + l));
-  }
-  ctx.lineWidth = 1;
-  ctx.strokeStyle = color(alfa);
-  ctx.stroke();
-}
+// Estrellas de fondo: puntos pequeños y nítidos dispersos por fuera del
+// anillo (como en la imagen de referencia), con su propio titileo. Son las
+// que cambian de color con el estado de Jarvis — la nebulosa nunca cambia.
+const N_ESTRELLAS = 30;
+const estrellas = Array.from({ length: N_ESTRELLAS }, (_, i) => ({
+  radioBase: 0.95 + Math.random() * 0.55,
+  anguloBase: Math.random() * Math.PI * 2,
+  velocidad: 0.1 + Math.random() * 0.3,
+  fase: Math.random() * Math.PI * 2,
+  tamano: 0.005 + Math.random() * 0.012,
+  parpadeo: 1.2 + Math.random() * 3.2,
+  sentido: i % 2 === 0 ? 1 : -1,
+}));
 
 let anterior = performance.now();
 function dibujar(ahora) {
@@ -119,7 +140,7 @@ function dibujar(ahora) {
 
   // Transición suave hacia el perfil del estado actual.
   const meta = PERFILES[estado];
-  const f = 1 - Math.pow(0.02, dt);
+  const f = 1 - Math.pow(0.2, dt);
   for (const k of ["giro", "brillo", "pulso", "barras", "orbitas"]) actual[k] = mezclar(actual[k], meta[k], f);
   actual.tono = actual.tono.map((c, i) => mezclar(c, meta.tono[i], f));
 
@@ -133,9 +154,11 @@ function dibujar(ahora) {
 
   angulo += dt * actual.giro;
   const w = innerWidth, h = innerHeight;
-  const R = Math.min(w, h) * 0.30;
+  const R = Math.min(w, h) * 0.24;
   const respira = 1 + actual.pulso * Math.sin(t * 1.6) + energia * 0.06;
   const b = actual.brillo;
+  // "pensando" agita la bruma (remolino más errático); el resto deriva en calma.
+  const turbulencia = 1 + actual.orbitas * 0.6;
 
   // Estela ligera en lugar de borrar del todo, pero hacia transparente (no
   // hacia negro): flotando sobre el escritorio, un velo oscuro taparía lo
@@ -148,60 +171,89 @@ function dibujar(ahora) {
   ctx.save();
   ctx.translate(w / 2, h / 2 - h * 0.04);
   ctx.globalCompositeOperation = "lighter";
-  ctx.shadowColor = color(0.9);
-  ctx.shadowBlur = 14;
 
-  // Núcleo (arco reactor).
-  const nucleo = R * 0.22 * respira;
-  const halo = ctx.createRadialGradient(0, 0, 0, 0, 0, nucleo * 2.2);
-  halo.addColorStop(0, `rgba(255,255,255,${0.5 * b})`);
-  halo.addColorStop(0.3, color(0.35 * b + energia * 0.3));
-  halo.addColorStop(1, color(0));
+  // Si hay energía de voz/micrófono, la bruma reacciona ensanchándose por
+  // pulsos en vez de con barras duras — más cónsono con niebla que con un
+  // ecualizador. Reusa el mismo arreglo para promediar el ruido en el tiempo.
+  for (let i = 0; i < espectro.length; i++) {
+    const ruido = 0.5 + 0.5 * Math.sin(t * 7 + i * 0.9) * Math.sin(t * 2.3 + i * 0.37);
+    espectro[i] = mezclar(espectro[i], energia * ruido, 0.25);
+  }
+  const pulsoAudio = actual.barras > 0.01
+    ? espectro.reduce((s, v) => s + v, 0) / espectro.length
+    : 0;
+
+  // Núcleo: el interior frío y azulado de la nebulosa. Fijo en color;
+  // respira de tamaño/brillo con el estado y la energía, igual que antes.
+  const nucleo = R * 0.55 * respira;
+  const halo = ctx.createRadialGradient(0, 0, 0, 0, 0, nucleo);
+  halo.addColorStop(0, `rgba(255,255,255,${0.35 * b})`);
+  halo.addColorStop(0.4, colorNucleoFrio(0.4 * b + energia * 0.2 + pulsoAudio * 0.2));
+  halo.addColorStop(1, colorNucleoFrio(0));
   ctx.fillStyle = halo;
-  ctx.beginPath(); ctx.arc(0, 0, nucleo * 2.2, 0, Math.PI * 2); ctx.fill();
-  anilloSegmentado(nucleo * 1.15, 10, 0.12, 3, -angulo * 1.5, 0.8 * b);
-  arco(nucleo * 1.45, 0, Math.PI * 2, 1, 0.5 * b);
+  ctx.beginPath(); ctx.arc(0, 0, nucleo, 0, Math.PI * 2); ctx.fill();
 
-  // Anillos que giran en sentidos opuestos.
-  anilloSegmentado(R * 0.45 * respira, 3, 0.5, 6, angulo * 2.2, 0.75 * b);
-  marcas(R * 0.55, 120, 4, -angulo * 0.6, 0.45 * b);
-  anilloSegmentado(R * 0.66, 48, 0.035, 2, -angulo, 0.5 * b);
-  arco(R * 0.78, angulo * 1.3, Math.PI * 1.2, 3, 0.7 * b);
-  arco(R * 0.78, angulo * 1.3 + Math.PI * 1.35, Math.PI * 0.4, 3, 0.4 * b);
-  marcas(R * 0.92, 180, 3, angulo * 0.3, 0.3 * b);
-  anilloSegmentado(R * 1.02, 6, 0.9, 1.5, -angulo * 0.4, 0.55 * b);
+  // Anillo de polvo: jirones ámbar/brasa en banda, fijo en color — solo se
+  // mueven con el estado, nunca cambian de tono.
+  for (const j of jirones) {
+    const angJiron = j.anguloBase + angulo * j.velocidad * j.sentido * turbulencia
+      + Math.sin(t * j.velocidad * 0.6 + j.fase) * j.ondulacion * turbulencia;
+    const radioJiron = R * j.radioBase * (1 + 0.08 * Math.sin(t * j.velocidad + j.fase) + pulsoAudio * 0.12);
+    const x = Math.cos(angJiron) * radioJiron;
+    const y = Math.sin(angJiron) * radioJiron;
+    const centelleo = 0.5 + 0.5 * Math.sin(t * j.parpadeo + j.fase);
+    const radioBlob = R * j.tamano * respira * (0.85 + 0.3 * centelleo);
+    const f = (j.radioBase - 0.5) / 0.45;
+    const alfa = (0.55 + 0.35 * centelleo) * (0.6 + 0.4 * b);
 
-  // Barras radiales: vibran con la voz (escuchando y hablando).
-  if (actual.barras > 0.01) {
-    for (let i = 0; i < espectro.length; i++) {
-      const ruido = 0.5 + 0.5 * Math.sin(t * 7 + i * 0.9) * Math.sin(t * 2.3 + i * 0.37);
-      espectro[i] = mezclar(espectro[i], energia * ruido, 0.25);
-    }
+    const blob = ctx.createRadialGradient(x, y, 0, x, y, radioBlob);
+    blob.addColorStop(0, colorAnillo(f, alfa));
+    blob.addColorStop(1, colorAnillo(f, 0));
+    ctx.fillStyle = blob;
+    ctx.beginPath(); ctx.arc(x, y, radioBlob, 0, Math.PI * 2); ctx.fill();
+  }
+
+  // Estrella central: el indicador principal del estado — su color sí
+  // cambia (PERFILES.tono), con picos de difracción como en la referencia.
+  const brazo = nucleo * (0.9 + 0.5 * energia);
+  ctx.save();
+  ctx.rotate(angulo * 0.15);
+  ctx.strokeStyle = color(0.85 * b);
+  ctx.lineWidth = 1.4;
+  for (const [largo, ancho] of [[brazo, 1], [brazo * 0.42, Math.PI / 2]]) {
     ctx.beginPath();
-    const base = R * 1.1;
-    for (let i = 0; i < espectro.length; i++) {
-      const a = (i / espectro.length) * Math.PI * 2 - Math.PI / 2;
-      const largo = 3 + espectro[i] * R * 0.35;
-      ctx.moveTo(Math.cos(a) * base, Math.sin(a) * base);
-      ctx.lineTo(Math.cos(a) * (base + largo), Math.sin(a) * (base + largo));
-    }
-    ctx.lineWidth = 2.5;
-    ctx.strokeStyle = color(0.8 * actual.barras * b);
+    ctx.moveTo(Math.cos(ancho) * -largo, Math.sin(ancho) * -largo);
+    ctx.lineTo(Math.cos(ancho) * largo, Math.sin(ancho) * largo);
     ctx.stroke();
   }
+  ctx.restore();
+  const centro = nucleo * 0.16 * (1 + 0.3 * energia);
+  const brilloCentro = ctx.createRadialGradient(0, 0, 0, 0, 0, centro * 3);
+  brilloCentro.addColorStop(0, `rgba(255,255,255,${0.9 * b})`);
+  brilloCentro.addColorStop(0.3, color(0.7 * b));
+  brilloCentro.addColorStop(1, color(0));
+  ctx.fillStyle = brilloCentro;
+  ctx.beginPath(); ctx.arc(0, 0, centro * 3, 0, Math.PI * 2); ctx.fill();
 
-  // Órbitas de escaneo mientras piensa.
-  if (actual.orbitas > 0.01) {
-    for (let i = 0; i < 3; i++) {
-      const r = R * (0.6 + i * 0.22);
-      const a = t * (2.4 - i * 0.6) * (i % 2 ? -1 : 1);
-      arco(r, a, Math.PI * 0.35, 2, 0.9 * actual.orbitas);
-      ctx.fillStyle = `rgba(255,255,255,${actual.orbitas})`;
-      ctx.beginPath();
-      ctx.arc(Math.cos(a + Math.PI * 0.35) * r, Math.sin(a + Math.PI * 0.35) * r, 3.5, 0, Math.PI * 2);
-      ctx.fill();
-    }
+  // Estrellas de fondo: puntos nítidos dispersos fuera del anillo, también
+  // con el color del estado — tenues y pequeñas, no compiten con la central.
+  for (const e of estrellas) {
+    const angEstrella = e.anguloBase + angulo * e.velocidad * e.sentido;
+    const radioEstrella = R * e.radioBase;
+    const x = Math.cos(angEstrella) * radioEstrella;
+    const y = Math.sin(angEstrella) * radioEstrella;
+    const centelleo = 0.5 + 0.5 * Math.sin(t * e.parpadeo + e.fase);
+    const radioPunto = R * e.tamano * (0.6 + 0.6 * centelleo);
+    const alfa = b * (0.3 + 0.55 * centelleo);
+
+    const punto = ctx.createRadialGradient(x, y, 0, x, y, radioPunto * 3);
+    punto.addColorStop(0, `rgba(255,255,255,${alfa})`);
+    punto.addColorStop(0.35, color(alfa * 0.8));
+    punto.addColorStop(1, color(0));
+    ctx.fillStyle = punto;
+    ctx.beginPath(); ctx.arc(x, y, radioPunto * 3, 0, Math.PI * 2); ctx.fill();
   }
+
   ctx.restore();
 
   etiqueta.style.color = color(1);
