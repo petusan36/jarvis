@@ -81,7 +81,8 @@ class DetectorVoz:
         return None
 
 
-def grabar_frase_con_vad(sensibilidad: float = 3.0, hud: HudNulo | None = None):
+def grabar_frase_con_vad(sensibilidad: float = 3.0, hud: HudNulo | None = None,
+                         margen_eco_segundos: float = 0.25):
     """Graba una sola frase por el micrófono con el mismo detector de voz
     (VAD) que usa ``Oido`` en uso normal: arranca cuando detecta voz, corta
     tras un silencio. Separado de ``Oido._grabar_continuo`` (que ahora la
@@ -92,8 +93,17 @@ def grabar_frase_con_vad(sensibilidad: float = 3.0, hud: HudNulo | None = None):
     MISMAS condiciones que la verificación en uso real (frases cortas
     recortadas por VAD), no como una grabación continua de varios segundos
     aparte — confirmado en vivo que esa discrepancia por sí sola bajaba la
-    similitud real a 0,22-0,39 contra el umbral, independientemente de qué
-    tan bajo se pusiera el umbral."""
+    similitud real a 0,22-0,39 contra el umbral. Con eso corregido, la
+    similitud siguió baja (0,279 en una prueba real) — sospecha siguiente,
+    sin confirmar todavía: ``margen_eco_segundos`` (0,25s) puede ser
+    insuficiente para que el eco acústico del TTS de Jarvis (que anuncia
+    "decí algo ahora" justo antes de grabar, en el enrolamiento automático)
+    termine de apagarse antes de que el VAD empiece a escuchar — mezclando
+    la propia voz sintética de Jarvis con la del usuario en la huella de
+    referencia. El enrolamiento pasa un margen mayor por este motivo; el
+    uso normal de Oido deja el default (ahí la urgencia de responder rápido
+    importa más, y el "eco" es la cola de la respuesta anterior, no un
+    anuncio hablado literalmente antes de escuchar)."""
     import numpy as np
     import sounddevice as sd
 
@@ -110,7 +120,7 @@ def grabar_frase_con_vad(sensibilidad: float = 3.0, hud: HudNulo | None = None):
     with sd.InputStream(samplerate=FRECUENCIA, channels=1, dtype="float32",
                         blocksize=BLOQUE, callback=al_recibir):
         # Al abrir el micrófono justo después de que Jarvis hable puede quedar eco: se descarta.
-        fin_eco = time.monotonic() + 0.25
+        fin_eco = time.monotonic() + margen_eco_segundos
         while True:
             bloque = bloques.get()
             if time.monotonic() < fin_eco:

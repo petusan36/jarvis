@@ -79,3 +79,19 @@ def test_sin_hud_usa_hudnulo_sin_romper():
         with patch("jarvis.voz.oido.time.monotonic", side_effect=lambda: next(avance_reloj)):
             audio = grabar_frase_con_vad(sensibilidad=3.0)  # hud=None por defecto
     assert isinstance(audio, np.ndarray)
+
+
+def test_acepta_margen_de_eco_personalizado_sin_romper():
+    """grabar_frase_con_vad(margen_eco_segundos=...) — el default de Oido
+    (0,25s) no alcanza para el enrolamiento (ver hablante.py,
+    MARGEN_ECO_ENROLAMIENTO_SEGUNDOS); confirma que el parámetro se acepta
+    y se respeta sin romper la captura normal."""
+    bloques = [_bloque_voz()] * 6 + [_bloque_silencio()] * 28
+    # Todos los bloques llegan después de fin_eco = 1000.0 + 2.0 = 1002.0,
+    # así que se procesan con normalidad pese al margen más grande.
+    avance_reloj = iter([1000.0] + [1002.3] * 100)
+    with patch("sounddevice.InputStream", _input_stream_falso(bloques)):
+        with patch("jarvis.voz.oido.time.monotonic", side_effect=lambda: next(avance_reloj)):
+            audio = grabar_frase_con_vad(sensibilidad=3.0, margen_eco_segundos=2.0)
+    assert isinstance(audio, np.ndarray)
+    assert len(audio) > 0
