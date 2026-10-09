@@ -165,7 +165,7 @@ def _grabar_y_guardar(config, anunciar=print) -> Path:
     embeddings = []
     for i in range(N_FRASES_ENROLAMIENTO):
         anunciar(f"⏺  Decí algo ahora (frase {i + 1} de {N_FRASES_ENROLAMIENTO})...")
-        audio = _grabar_frase_con_limite(config.sensibilidad_voz)
+        audio = _grabar_frase_con_limite(config.sensibilidad_voz, margen_eco_segundos=MARGEN_ECO_ENROLAMIENTO_SEGUNDOS)
         embeddings.append(verificador.embedding(audio))
 
     embedding_promedio = np.mean(embeddings, axis=0)
@@ -176,9 +176,16 @@ def _grabar_y_guardar(config, anunciar=print) -> Path:
 
 
 LIMITE_SEGUNDOS_POR_FRASE = 20
+# Más alto que el default de grabar_frase_con_vad (0,25s): acá Jarvis anuncia
+# "decí algo ahora" por TTS justo antes de grabar, así que hay más margen de
+# que quede cola acústica de su propia voz. Sospecha sin confirmar todavía
+# (ver docstring de grabar_frase_con_vad en oido.py) de por qué la similitud
+# seguía baja (0,279) después de igualar el mecanismo de captura.
+MARGEN_ECO_ENROLAMIENTO_SEGUNDOS = 1.5
 
 
-def _grabar_frase_con_limite(sensibilidad: float, limite_segundos: float = LIMITE_SEGUNDOS_POR_FRASE):
+def _grabar_frase_con_limite(sensibilidad: float, limite_segundos: float = LIMITE_SEGUNDOS_POR_FRASE,
+                             margen_eco_segundos: float = MARGEN_ECO_ENROLAMIENTO_SEGUNDOS):
     """Como ``grabar_frase_con_vad``, pero con un límite de tiempo: esa
     función espera voz SIN límite (correcto para ``Oido`` en uso normal,
     que debe seguir escuchando indefinidamente) — mal en el enrolamiento,
@@ -194,7 +201,8 @@ def _grabar_frase_con_limite(sensibilidad: float, limite_segundos: float = LIMIT
 
     def trabajo() -> None:
         try:
-            resultado.put(("ok", grabar_frase_con_vad(sensibilidad=sensibilidad)))
+            audio = grabar_frase_con_vad(sensibilidad=sensibilidad, margen_eco_segundos=margen_eco_segundos)
+            resultado.put(("ok", audio))
         except Exception as error:  # noqa: BLE001 — se re-lanza tal cual del lado del que espera
             resultado.put(("error", error))
 
