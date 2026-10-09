@@ -29,6 +29,9 @@ from .proveedores import (
     listar_modelos_ollama,
 )
 
+ESPERA_MAXIMA_ARRANQUE_OLLAMA_SEGUNDOS = 5
+ESPERA_ENTRE_POLLEOS_OLLAMA_SEGUNDOS = 0.5
+
 TIMEOUT_LOGIN_VENTANA_SEGUNDOS = 180  # cuánto esperar, pollendo, un login en la Terminal que se abrió
 ESPERA_ENTRE_POLLEOS_SEGUNDOS = 1.5
 
@@ -51,6 +54,8 @@ def _crear_memoria(config: Config):
     se cargan."""
     from .memoria import AdaptadorMemoriaGraphiti
 
+    _asegurar_ollama_corriendo(config.ollama_url)
+
     return AdaptadorMemoriaGraphiti(
         config.carpeta_datos / "memoria",
         ollama_url=config.ollama_url,
@@ -58,6 +63,43 @@ def _crear_memoria(config: Config):
         modelo_embedding=config.memoria_modelo_embedding,
         ventana_gracia_dias=config.memoria_ventana_gracia_dias,
     )
+
+
+def _asegurar_ollama_corriendo(url: str) -> None:
+    """La memoria permanente requiere Ollama (ver ``_crear_memoria``), pero
+    nadie lo arranca por el usuario hoy: si no está corriendo, cada turno
+    falla en silencio (ver ``_contexto_memoria`` en cerebro.py) sin que se
+    note la causa real. Si detecta que no responde, intenta levantarlo solo
+    con ``ollama serve`` y espera un poco a que aparezca — así la memoria
+    queda funcionando de verdad en vez de degradar en silencio por un
+    daemon que nadie prendió.
+
+    No hace nada si Ollama ya responde, ni si el binario no está instalado
+    (eso sigue sin poder resolverse solo: lo explica el mensaje de error
+    existente en ``_menu_conexion_ia``)."""
+    try:
+        listar_modelos_ollama(url)
+        return  # ya está corriendo
+    except OSError:
+        pass
+
+    try:
+        subprocess.Popen(
+            ["ollama", "serve"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+        )
+    except FileNotFoundError:
+        print("(memoria: Ollama no está instalado — ver https://ollama.com)")
+        return
+
+    limite = time.monotonic() + ESPERA_MAXIMA_ARRANQUE_OLLAMA_SEGUNDOS
+    while time.monotonic() < limite:
+        time.sleep(ESPERA_ENTRE_POLLEOS_OLLAMA_SEGUNDOS)
+        try:
+            listar_modelos_ollama(url)
+            return
+        except OSError:
+            continue
+    print(f"(memoria: Ollama no respondió tras arrancarlo en {ESPERA_MAXIMA_ARRANQUE_OLLAMA_SEGUNDOS}s)")
 
 
 def _crear_cerebro(config: Config, forzar_menu: bool = False):
